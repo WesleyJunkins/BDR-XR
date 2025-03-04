@@ -292,21 +292,19 @@ class XRScene {
             
             // Reset camera controls based on mode
             if (this.cameraMode === 0) { // Stationary
-                // Calculate new camera position based on drone's current position
+                // Reset to original starting position
                 const cameraHeight = 2.2;
-                const cameraOffset = 4; // Distance behind drone
-                
                 this.camera.position = new BABYLON.Vector3(
-                    this.drone.position.x, // Same x as drone
+                    0,                                  // Centered on track
                     this.trackElevation + cameraHeight, // Fixed height
-                    this.drone.position.z - cameraOffset // Slightly behind drone
+                    -this.trackLength/2 + 4            // Original starting position
                 );
                 
-                // Look at a point ahead of the drone
+                // Look toward the end of the track
                 this.camera.setTarget(new BABYLON.Vector3(
-                    this.drone.position.x, // Same x as drone
-                    this.trackElevation + 2.0, // Fixed height for looking
-                    this.drone.position.z + this.trackLength/4 // Look ahead of drone
+                    0,                          // Center of track
+                    this.trackElevation + 2.0,  // Fixed height for looking
+                    this.trackLength/2          // Looking toward end of track
                 ));
                 
                 this.camera.attachControl(this.canvas, true);
