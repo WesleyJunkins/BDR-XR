@@ -27,45 +27,74 @@ class XRScene {
         this.scene = new BABYLON.Scene(this.engine);
 
         // Add a camera
-        this.camera = new BABYLON.FreeCamera("camera", new BABYLON.Vector3(0, 1.6, -3), this.scene);
+        this.camera = new BABYLON.FreeCamera("camera", new BABYLON.Vector3(0, 5, -10), this.scene);
         this.camera.setTarget(BABYLON.Vector3.Zero());
         this.camera.attachControl(this.canvas, true);
 
         // Add lights
         const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), this.scene);
-        light.intensity = 0.7;
+        light.intensity = 1.0;
 
-        // Create room
-        const roomWidth = 10;
-        const roomLength = 30;
-        const roomHeight = 4;
+        // Define common dimensions and levels
+        const trackWidth = 10;
+        const trackLength = 100;  // Increased from 30 to 100
+        const trackHeight = 0.3;
+        const waterLevel = -1;
+        const trackElevation = 10;
 
-        // Floor (racetrack)
-        const floor = BABYLON.MeshBuilder.CreateGround("floor", {
-            width: roomWidth,
-            height: roomLength
+        // Create skybox
+        const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: 1000.0 }, this.scene);
+        const skyboxMaterial = new BABYLON.StandardMaterial("skyBox", this.scene);
+        skyboxMaterial.backFaceCulling = false;
+        skyboxMaterial.reflectionTexture = new BABYLON.CubeTexture("https://playground.babylonjs.com/textures/TropicalSunnyDay", this.scene);
+        skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+        skyboxMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
+        skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
+        skyboxMaterial.disableLighting = true;
+        skybox.material = skyboxMaterial;
+
+        // Create textured ground underneath water
+        const groundMaterial = new BABYLON.StandardMaterial("groundMaterial", this.scene);
+        groundMaterial.diffuseTexture = new BABYLON.Texture("https://playground.babylonjs.com/textures/ground.jpg", this.scene);
+        groundMaterial.diffuseTexture.uScale = 4;
+        groundMaterial.diffuseTexture.vScale = 4;
+
+        const ground = BABYLON.MeshBuilder.CreateGround("ground", {
+            width: 512,
+            height: 512,
+            subdivisions: 32
         }, this.scene);
-        
+        ground.position.y = waterLevel - 1; // Position it just below water level
+        ground.material = groundMaterial;
+
+        // Create floating platform (racetrack)
+        const track = BABYLON.MeshBuilder.CreateBox("track", {
+            width: trackWidth,
+            height: trackHeight,
+            depth: trackLength
+        }, this.scene);
+        track.position.y = trackElevation; // Elevated above water
+
         // Apply racetrack material
         const trackMaterial = new BABYLON.StandardMaterial("trackMaterial", this.scene);
         trackMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.2, 0.2); // Dark gray for asphalt
-        floor.material = trackMaterial;
+        track.material = trackMaterial;
 
-        // Add racing lines
+        // Add racing lines - adjust their height to match track
         const lineWidth = 0.3;
         const leftLine = BABYLON.MeshBuilder.CreateGround("leftLine", {
             width: lineWidth,
-            height: roomLength
+            height: trackLength
         }, this.scene);
-        leftLine.position.x = -roomWidth/4;
-        leftLine.position.y = 0.01; // Slightly above floor to prevent z-fighting
+        leftLine.position.x = -trackWidth/4;
+        leftLine.position.y = trackElevation + trackHeight/2 + 0.01; // Adjusted height
 
         const rightLine = BABYLON.MeshBuilder.CreateGround("rightLine", {
             width: lineWidth,
-            height: roomLength
+            height: trackLength
         }, this.scene);
-        rightLine.position.x = roomWidth/4;
-        rightLine.position.y = 0.01;
+        rightLine.position.x = trackWidth/4;
+        rightLine.position.y = trackElevation + trackHeight/2 + 0.01; // Adjusted height
 
         // White material for lines
         const lineMaterial = new BABYLON.StandardMaterial("lineMaterial", this.scene);
@@ -73,63 +102,60 @@ class XRScene {
         leftLine.material = lineMaterial;
         rightLine.material = lineMaterial;
 
-        // Create walls
-        const wallMaterial = new BABYLON.StandardMaterial("wallMaterial", this.scene);
-        wallMaterial.diffuseColor = new BABYLON.Color3(0.8, 0.8, 0.9); // Light blue-gray
-
-        // Left wall
-        const leftWall = BABYLON.MeshBuilder.CreatePlane("leftWall", {
-            width: roomLength,
-            height: roomHeight
+        // Create water
+        const waterMesh = BABYLON.MeshBuilder.CreateGround("waterMesh", {
+            width: 512,
+            height: 512,
+            subdivisions: 64  // Increased for finer wave detail
         }, this.scene);
-        leftWall.position = new BABYLON.Vector3(-roomWidth/2, roomHeight/2, roomLength/2 - roomLength/2);
-        leftWall.rotation.y = Math.PI/2;
-        leftWall.material = wallMaterial;
+        waterMesh.position.y = waterLevel;
 
-        // Right wall
-        const rightWall = BABYLON.MeshBuilder.CreatePlane("rightWall", {
-            width: roomLength,
-            height: roomHeight
-        }, this.scene);
-        rightWall.position = new BABYLON.Vector3(roomWidth/2, roomHeight/2, roomLength/2 - roomLength/2);
-        rightWall.rotation.y = -Math.PI/2;
-        rightWall.material = wallMaterial;
+        const water = new BABYLON.WaterMaterial("water", this.scene);
+        
+        // Enhanced water properties - more dynamic waves and faster flow
+        water.windForce = -15;           // Increased wind force for more movement
+        water.waveHeight = 0.5;          // Reduced for finer waves
+        water.windDirection = new BABYLON.Vector2(1, 1);
+        water.waterColor = new BABYLON.Color3(0, 0.3, 0.5);
+        water.colorBlendFactor = 0.1;    // Reduced for more visible waves
+        water.waveLength = 0.005;         // Reduced for finer ripples
+        water.waveSpeed = 40.0;          // Doubled for faster movement
+        water.bumpHeight = 0.001;          // Adjusted for better wave definition
+        water.waveCount = 80;            // Doubled for more frequent waves
+        
+        // Add ground to water reflections
+        water.addToRenderList(skybox);
+        water.addToRenderList(track);
+        water.addToRenderList(leftLine);
+        water.addToRenderList(rightLine);
+        water.addToRenderList(ground); // Add ground to water reflections
 
-        // Front wall
-        const frontWall = BABYLON.MeshBuilder.CreatePlane("frontWall", {
-            width: roomWidth,
-            height: roomHeight
-        }, this.scene);
-        frontWall.position = new BABYLON.Vector3(0, roomHeight/2, roomLength - roomLength/2);
-        frontWall.rotation.y = Math.PI;
-        frontWall.material = wallMaterial;
+        // Assign the water material
+        waterMesh.material = water;
 
-        // Back wall
-        const backWall = BABYLON.MeshBuilder.CreatePlane("backWall", {
-            width: roomWidth,
-            height: roomHeight
-        }, this.scene);
-        backWall.position = new BABYLON.Vector3(0, roomHeight/2, -roomLength/2);
-        backWall.material = wallMaterial;
+        // Adjust camera position to see more of the longer track
+        const cameraHeight = 2.2;
+        this.camera.position = new BABYLON.Vector3(
+            0,                              // Centered on track
+            trackElevation + cameraHeight,  // Standing height above track
+            -trackLength/2 + 4              // Moved back a bit more to see longer track
+        );
+        this.camera.setTarget(new BABYLON.Vector3(
+            0,                      // Looking straight ahead
+            trackElevation + 2.0,   // Same height as before
+            trackLength/2           // Looking toward the end of the longer track
+        ));
 
-        // Ceiling
-        const ceiling = BABYLON.MeshBuilder.CreatePlane("ceiling", {
-            width: roomWidth,
-            height: roomLength
-        }, this.scene);
-        ceiling.position = new BABYLON.Vector3(0, roomHeight, 0);
-        ceiling.rotation.x = Math.PI/2;
-        ceiling.material = wallMaterial;
-
-        // Adjust camera position to better starting point
-        this.camera.position = new BABYLON.Vector3(0, 1.6, -roomLength/2 + 2);
+        // Optional: Restrict camera movement for a more controlled experience
+        this.camera.upperBetaLimit = Math.PI / 2;    // Limit looking up
+        this.camera.lowerBetaLimit = -Math.PI / 2;   // Limit looking down
     }
 
     async initializeXR() {
         try {
             // Check if XR is available
             const xrHelper = await this.scene.createDefaultXRExperienceAsync({
-                floorMeshes: [this.scene.getMeshByName("floor")]
+                floorMeshes: [this.scene.getMeshByName("track")]
             });
 
             // Enable XR button when available
