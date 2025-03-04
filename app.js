@@ -51,8 +51,8 @@ class XRScene {
         this.originalCameraPosition = this.camera.position.clone();
         this.originalCameraTarget = new BABYLON.Vector3(0, this.trackElevation + 2.0, this.trackLength/2);
 
-        // Create camera switch button
-        this.createViewButton();
+        // Create GUI
+        this.createGUI();
 
         // Add keyboard controls for the drone
         this.setupDroneControls();
@@ -94,12 +94,12 @@ class XRScene {
         const trackMaterial = new BABYLON.StandardMaterial("trackMaterial", this.scene);
 
         // Add floor texture
-        trackMaterial.diffuseTexture = new BABYLON.Texture("assets/floor.jpg", this.scene);
+        trackMaterial.diffuseTexture = new BABYLON.Texture("assets/floor.png", this.scene);
         trackMaterial.diffuseTexture.uScale = 4;  // Adjust texture tiling on width
         trackMaterial.diffuseTexture.vScale = 40; // Adjust texture tiling on length
 
         // Add bump texture for more realism
-        trackMaterial.bumpTexture = new BABYLON.Texture("assets/floor_bump.jpg", this.scene);
+        trackMaterial.bumpTexture = new BABYLON.Texture("assets/floor_bump.PNG", this.scene);
         trackMaterial.bumpTexture.uScale = 4;
         trackMaterial.bumpTexture.vScale = 40;
 
@@ -255,233 +255,128 @@ class XRScene {
             propeller.material = propMaterial;
         });
 
-        // Position the drone in front of the camera
+        // Position the drone on the ground at start
         const cameraHeight = 2.2;
         drone.position = new BABYLON.Vector3(
             0,                                  // Centered on x-axis
-            this.trackElevation + cameraHeight, // Same height as camera view
+            this.trackElevation + this.trackHeight/2 + 0.2, // Just above track surface
             -this.trackLength/2 + 8            // A few units in front of camera
         );
 
-        // Add animation to rotate propellers
-        this.scene.registerBeforeRender(() => {
-            for(let i = 0; i < 4; i++) {
-                const propeller = this.scene.getMeshByName(`propeller${i}`);
-                propeller.rotation.y += 0.2; // Rotate propellers continuously
-            }
-        });
+        // Store initial position for reset
+        this.initialDronePosition = drone.position.clone();
+        this.flyingHeight = this.trackElevation + cameraHeight;
+        this.isFlying = false;
 
         // Store drone reference for later use
         this.drone = drone;
     }
 
-    createViewButton() {
-        // Create button element
-        const viewButton = document.createElement('button');
-        viewButton.textContent = 'Change View (Stationary)';
-        viewButton.style.position = 'absolute';
-        viewButton.style.bottom = '20px';
-        viewButton.style.left = '20px';
-        viewButton.style.padding = '10px';
-        viewButton.style.zIndex = '1000';
-        document.body.appendChild(viewButton);
+    createGUI() {
+        // Create AdvancedDynamicTexture for GUI
+        const advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
 
-        // Add click handler
-        viewButton.addEventListener('click', () => {
+        // Create a horizontal stack panel for buttons
+        const stackPanel = new BABYLON.GUI.StackPanel();
+        stackPanel.isVertical = false;
+        stackPanel.height = "40px";
+        stackPanel.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+        stackPanel.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
+        stackPanel.left = "20px";
+        stackPanel.top = "-20px";
+        advancedTexture.addControl(stackPanel);
+
+        // Create View Button
+        const viewButton = BABYLON.GUI.Button.CreateSimpleButton("viewButton", "Change View (Stationary)");
+        viewButton.width = "180px";
+        viewButton.height = "40px";
+        viewButton.color = "white";
+        viewButton.cornerRadius = 5;
+        viewButton.background = "rgba(51, 51, 51, 0.8)";
+        viewButton.paddingRight = "10px";
+        stackPanel.addControl(viewButton);
+
+        // Create Flight Button
+        const flightButton = BABYLON.GUI.Button.CreateSimpleButton("flightButton", "Lift-Off");
+        flightButton.width = "120px";
+        flightButton.height = "40px";
+        flightButton.color = "white";
+        flightButton.cornerRadius = 5;
+        flightButton.background = "rgba(51, 51, 51, 0.8)";
+        flightButton.paddingRight = "10px";
+        flightButton.paddingLeft = "10px";
+        stackPanel.addControl(flightButton);
+
+        // Create Reset Button
+        const resetButton = BABYLON.GUI.Button.CreateSimpleButton("resetButton", "Reset Position");
+        resetButton.width = "140px";
+        resetButton.height = "40px";
+        resetButton.color = "white";
+        resetButton.cornerRadius = 5;
+        resetButton.background = "rgba(51, 51, 51, 0.8)";
+        resetButton.paddingLeft = "10px";
+        stackPanel.addControl(resetButton);
+
+        // Store button reference
+        this.flightButton = flightButton;
+
+        // Add click handlers
+        viewButton.onPointerClickObservable.add(() => {
             this.cameraMode = (this.cameraMode + 1) % 3;
             
-            // Reset camera controls based on mode
             if (this.cameraMode === 0) { // Stationary
-                // Reset to original starting position
                 const cameraHeight = 2.2;
                 this.camera.position = new BABYLON.Vector3(
-                    0,                                  // Centered on track
-                    this.trackElevation + cameraHeight, // Fixed height
-                    -this.trackLength/2 + 4            // Original starting position
+                    0,
+                    this.trackElevation + cameraHeight,
+                    -this.trackLength/2 + 4
                 );
                 
-                // Look toward the end of the track
                 this.camera.setTarget(new BABYLON.Vector3(
-                    0,                          // Center of track
-                    this.trackElevation + 2.0,  // Fixed height for looking
-                    this.trackLength/2          // Looking toward end of track
+                    0,
+                    this.trackElevation + 2.0,
+                    this.trackLength/2
                 ));
                 
                 this.camera.attachControl(this.canvas, true);
-                viewButton.textContent = 'Change View (Stationary)';
+                viewButton.textBlock.text = "Change View (Stationary)";
             } else {
-                this.camera.detachControl(); // Disable manual camera control in follow modes
-                if (this.cameraMode === 1) { // Follow behind
-                    viewButton.textContent = 'Change View (Follow)';
-                } else { // Side view
-                    viewButton.textContent = 'Change View (Side)';
+                this.camera.detachControl();
+                if (this.cameraMode === 1) {
+                    viewButton.textBlock.text = "Change View (Follow)";
+                } else {
+                    viewButton.textBlock.text = "Change View (Side)";
                 }
             }
         });
-    }
 
-    setupDroneControls() {
-        // Movement settings
-        const maxSpeed = 0.5;
-        const acceleration = 0.005;
-        const deceleration = 0.050;  // Increased from 0.003 to 0.015 for faster deceleration
-        const rotationSpeed = 0.05;
-        const maxTilt = 0.2;
-        const verticalAcceleration = 0.004;
-        const maxVerticalSpeed = 0.15;
-        
-        // Velocity state
-        const velocity = {
-            x: 0,
-            y: 0,
-            z: 0
-        };
-        
-        // Track key states
-        const keysPressed = {};
-        
-        // Handle keydown
-        window.addEventListener("keydown", (e) => {
-            keysPressed[e.key] = true;
+        flightButton.onPointerClickObservable.add(() => {
+            if (!this.isFlying) {
+                this.isFlying = true;
+                flightButton.textBlock.text = "Land";
+            } else {
+                this.isFlying = false;
+                flightButton.textBlock.text = "Lift-Off";
+            }
         });
-        
-        // Handle keyup
-        window.addEventListener("keyup", (e) => {
-            keysPressed[e.key] = false;
-        });
-        
-        // Add camera follow parameters
-        const followDistance = 5;
-        const followHeight = 2;
-        const sideViewDistance = 8;
-        
-        // Add track boundary
-        const finishLinePosition = this.trackLength/2 - 2;
-        const startPosition = -this.trackLength/2;
-        
-        // Register frame-by-frame movement
-        this.scene.registerBeforeRender(() => {
-            if (!this.drone) return;
 
-            // Store previous position for boundary checking
-            const previousZ = this.drone.position.z;
-
-            // Forward/Backward movement
-            if (keysPressed["ArrowUp"]) {
-                velocity.z = Math.min(velocity.z + acceleration, maxSpeed);
-                this.drone.rotation.x = maxTilt * (velocity.z / maxSpeed); // Changed from negative to positive
-            } else if (keysPressed["ArrowDown"]) {
-                velocity.z = Math.max(velocity.z - acceleration, -maxSpeed);
-                this.drone.rotation.x = maxTilt * (velocity.z / maxSpeed); // Changed from negative to positive
-            } else {
-                // Decelerate
-                if (Math.abs(velocity.z) > 0) {
-                    velocity.z *= (1 - deceleration);
-                    if (Math.abs(velocity.z) < 0.001) velocity.z = 0;
-                    this.drone.rotation.x = maxTilt * (velocity.z / maxSpeed); // Changed from negative to positive
-                }
-            }
-
-            // Left/Right movement
-            if (keysPressed["ArrowLeft"]) {
-                velocity.x = Math.max(velocity.x - acceleration, -maxSpeed);
-                this.drone.rotation.z = -maxTilt * (velocity.x / maxSpeed); // Proportional bank
-            } else if (keysPressed["ArrowRight"]) {
-                velocity.x = Math.min(velocity.x + acceleration, maxSpeed);
-                this.drone.rotation.z = -maxTilt * (velocity.x / maxSpeed); // Proportional bank
-            } else {
-                // Decelerate
-                if (Math.abs(velocity.x) > 0) {
-                    velocity.x *= (1 - deceleration);
-                    if (Math.abs(velocity.x) < 0.001) velocity.x = 0;
-                    this.drone.rotation.z = -maxTilt * (velocity.x / maxSpeed); // Maintain proportional bank
-                }
-            }
-
-            // Vertical movement
-            if (keysPressed["PageUp"]) {
-                velocity.y = Math.min(velocity.y + verticalAcceleration, maxVerticalSpeed);
-            } else if (keysPressed["PageDown"]) {
-                velocity.y = Math.max(velocity.y - verticalAcceleration, -maxVerticalSpeed);
-            } else {
-                // Vertical deceleration
-                if (Math.abs(velocity.y) > 0) {
-                    velocity.y *= (1 - deceleration);
-                    if (Math.abs(velocity.y) < 0.001) velocity.y = 0;
-                }
-            }
-
-            // Apply velocities to position
-            this.drone.position.x += velocity.x;
-            this.drone.position.y += velocity.y;
-            this.drone.position.z += velocity.z;
-
-            // Check track boundaries and prevent going past them
-            if (this.drone.position.z > finishLinePosition) {
-                this.drone.position.z = finishLinePosition;
-                velocity.z = 0; // Stop forward momentum
-            }
-            if (this.drone.position.z < startPosition) {
-                this.drone.position.z = startPosition;
-                velocity.z = 0; // Stop backward momentum
-            }
-
-            // Side boundaries (optional, prevents falling off track sides)
-            const sideLimit = this.trackWidth/2 - 0.4; // Leave small margin
-            if (Math.abs(this.drone.position.x) > sideLimit) {
-                this.drone.position.x = Math.sign(this.drone.position.x) * sideLimit;
-                velocity.x = 0; // Stop sideways momentum
-            }
-
-            // Add camera update logic after applying velocities
-            if (this.cameraMode === 1) { // Follow behind
-                // Calculate target position behind drone
-                const behind = new BABYLON.Vector3(
-                    this.drone.position.x,
-                    this.drone.position.y + followHeight,
-                    this.drone.position.z - followDistance
-                );
-                
-                // Smoothly move camera to position
-                this.camera.position = BABYLON.Vector3.Lerp(
-                    this.camera.position,
-                    behind,
-                    0.1
-                );
-                
-                // Look at drone
-                this.camera.setTarget(this.drone.position);
-            } 
-            else if (this.cameraMode === 2) { // Side view
-                // Calculate target position to the side of drone
-                const side = new BABYLON.Vector3(
-                    this.drone.position.x - sideViewDistance,
-                    this.drone.position.y + followHeight,
-                    this.drone.position.z
-                );
-                
-                // Smoothly move camera to position
-                this.camera.position = BABYLON.Vector3.Lerp(
-                    this.camera.position,
-                    side,
-                    0.1
-                );
-                
-                // Look at drone
-                this.camera.setTarget(this.drone.position);
-            }
-
-            // Adjust propeller speeds based on movement
-            const baseRotationSpeed = 0.2;
-            const speedFactor = Math.max(
-                Math.abs(velocity.x), 
-                Math.abs(velocity.y), 
-                Math.abs(velocity.z)
-            ) / maxSpeed;
+        resetButton.onPointerClickObservable.add(() => {
+            this.drone.position = this.initialDronePosition.clone();
+            this.isFlying = false;
+            flightButton.textBlock.text = "Lift-Off";
             
-            for(let i = 0; i < 4; i++) {
-                const propeller = this.scene.getMeshByName(`propeller${i}`);
-                propeller.rotation.y += baseRotationSpeed + (speedFactor * 0.3);
+            if (this.cameraMode === 0) {
+                const cameraHeight = 2.2;
+                this.camera.position = new BABYLON.Vector3(
+                    0,
+                    this.trackElevation + cameraHeight,
+                    -this.trackLength/2 + 4
+                );
+                this.camera.setTarget(new BABYLON.Vector3(
+                    0,
+                    this.trackElevation + 2.0,
+                    this.trackLength/2
+                ));
             }
         });
     }
@@ -514,6 +409,239 @@ class XRScene {
             console.log("XR not available:", error);
             this.xrButton.textContent = "XR Not Available";
         }
+    }
+
+    setupDroneControls() {
+        // Movement settings
+        const maxSpeed = 0.5;
+        const acceleration = 0.005;
+        const deceleration = 0.050;
+        const rotationSpeed = 0.05;
+        const maxTilt = 0.2;
+        
+        // Add camera follow parameters
+        const followDistance = 5;
+        const followHeight = 2;
+        const sideViewDistance = 8;
+        
+        // Add track boundary
+        const finishLinePosition = this.trackLength/2 - 2;
+        const startPosition = -this.trackLength/2;
+        
+        // Track key states
+        const keysPressed = {};
+        const velocity = { x: 0, y: 0, z: 0 };
+        
+        // Handle keydown
+        window.addEventListener("keydown", (e) => {
+            keysPressed[e.key] = true;
+        });
+        
+        // Handle keyup
+        window.addEventListener("keyup", (e) => {
+            keysPressed[e.key] = false;
+        });
+
+        // Enhanced vertical transition settings
+        const maxTakeoffSpeed = 0.1;
+        const minTakeoffSpeed = 0.01;  // Minimum speed for smooth final approach
+        const takeoffAcceleration = 0.002;
+        const takeoffDeceleration = 0.003;  // For smooth slowdown
+        let verticalTransitionVelocity = 0;
+        const targetLandingHeight = this.trackElevation + this.trackHeight/2 + 0.2;
+        const hoverHeight = this.flyingHeight;
+        
+        this.scene.registerBeforeRender(() => {
+            if (!this.drone) return;
+
+            // Handle takeoff and landing with smooth acceleration/deceleration
+            if (this.isFlying && this.drone.position.y < hoverHeight) {
+                // Smooth accelerating takeoff with deceleration near target
+                const heightDifference = hoverHeight - this.drone.position.y;
+                const distanceFactor = Math.min(heightDifference / 2, 1); // Start slowing down halfway
+                const targetSpeed = Math.max(
+                    minTakeoffSpeed,
+                    Math.min(maxTakeoffSpeed, heightDifference * 0.1) * distanceFactor
+                );
+                
+                if (heightDifference > 0.01) {
+                    if (verticalTransitionVelocity < targetSpeed) {
+                        verticalTransitionVelocity += takeoffAcceleration;
+                    } else if (verticalTransitionVelocity > targetSpeed) {
+                        verticalTransitionVelocity -= takeoffDeceleration;
+                    }
+                    
+                    this.drone.position.y += verticalTransitionVelocity;
+                    
+                    // Reduce wobble as it reaches target
+                    const wobbleFactor = Math.min(distanceFactor, 0.5);
+                    this.drone.rotation.x = (Math.random() - 0.5) * 0.05 * wobbleFactor;
+                    this.drone.rotation.z = (Math.random() - 0.5) * 0.05 * wobbleFactor;
+                }
+            } else if (!this.isFlying && this.drone.position.y > targetLandingHeight) {
+                // Smooth decelerating landing
+                const heightDifference = this.drone.position.y - targetLandingHeight;
+                const distanceFactor = Math.min(heightDifference / 2, 1); // Start slowing down halfway
+                const targetSpeed = Math.max(
+                    minTakeoffSpeed,
+                    Math.min(maxTakeoffSpeed, heightDifference * 0.1) * distanceFactor
+                );
+                
+                if (heightDifference > 0.01) {
+                    if (verticalTransitionVelocity < targetSpeed) {
+                        verticalTransitionVelocity += takeoffAcceleration;
+                    } else if (verticalTransitionVelocity > targetSpeed) {
+                        verticalTransitionVelocity -= takeoffDeceleration;
+                    }
+                    
+                    this.drone.position.y -= verticalTransitionVelocity;
+                    
+                    // Reduce wobble as it approaches ground
+                    const wobbleFactor = Math.min(distanceFactor, 0.5);
+                    this.drone.rotation.x = (Math.random() - 0.5) * 0.03 * wobbleFactor;
+                    this.drone.rotation.z = (Math.random() - 0.5) * 0.03 * wobbleFactor;
+                }
+            } else {
+                // Reset vertical transition velocity when not transitioning
+                verticalTransitionVelocity = 0;
+                
+                // If landed, ensure drone is level
+                if (!this.isFlying && this.drone.position.y <= targetLandingHeight + 0.01) {
+                    this.drone.rotation.x = 0;
+                    this.drone.rotation.z = 0;
+                }
+            }
+
+            // Modify the transition check to be more precise
+            const isTransitioning = 
+                (this.isFlying && this.drone.position.y < hoverHeight - 0.01) || 
+                (!this.isFlying && this.drone.position.y > targetLandingHeight + 0.01);
+
+            // Only allow movement controls when flying (remove the transition check)
+            if (this.isFlying) {
+                // Forward/Backward movement
+                if (keysPressed["ArrowUp"]) {
+                    velocity.z = Math.min(velocity.z + acceleration, maxSpeed);
+                    this.drone.rotation.x = maxTilt * (velocity.z / maxSpeed);
+                } else if (keysPressed["ArrowDown"]) {
+                    velocity.z = Math.max(velocity.z - acceleration, -maxSpeed);
+                    this.drone.rotation.x = maxTilt * (velocity.z / maxSpeed);
+                } else {
+                    if (Math.abs(velocity.z) > 0) {
+                        velocity.z *= (1 - deceleration);
+                        if (Math.abs(velocity.z) < 0.001) velocity.z = 0;
+                        this.drone.rotation.x = maxTilt * (velocity.z / maxSpeed);
+                    }
+                }
+
+                // Left/Right movement
+                if (keysPressed["ArrowLeft"]) {
+                    velocity.x = Math.max(velocity.x - acceleration, -maxSpeed);
+                    this.drone.rotation.z = -maxTilt * (velocity.x / maxSpeed);
+                } else if (keysPressed["ArrowRight"]) {
+                    velocity.x = Math.min(velocity.x + acceleration, maxSpeed);
+                    this.drone.rotation.z = -maxTilt * (velocity.x / maxSpeed);
+                } else {
+                    if (Math.abs(velocity.x) > 0) {
+                        velocity.x *= (1 - deceleration);
+                        if (Math.abs(velocity.x) < 0.001) velocity.x = 0;
+                        this.drone.rotation.z = -maxTilt * (velocity.x / maxSpeed);
+                    }
+                }
+
+                // Vertical movement
+                if (keysPressed["PageUp"]) {
+                    velocity.y = Math.min(velocity.y + acceleration, maxSpeed);
+                } else if (keysPressed["PageDown"]) {
+                    velocity.y = Math.max(velocity.y - acceleration, -maxSpeed);
+                } else {
+                    if (Math.abs(velocity.y) > 0) {
+                        velocity.y *= (1 - deceleration);
+                        if (Math.abs(velocity.y) < 0.001) velocity.y = 0;
+                    }
+                }
+
+                // Apply velocities
+                this.drone.position.x += velocity.x;
+                this.drone.position.y += velocity.y;
+                this.drone.position.z += velocity.z;
+
+                // Check track boundaries
+                if (this.drone.position.z > finishLinePosition) {
+                    this.drone.position.z = finishLinePosition;
+                    velocity.z = 0;
+                }
+                if (this.drone.position.z < startPosition) {
+                    this.drone.position.z = startPosition;
+                    velocity.z = 0;
+                }
+
+                // Side boundaries
+                const sideLimit = this.trackWidth/2 - 0.4;
+                if (Math.abs(this.drone.position.x) > sideLimit) {
+                    this.drone.position.x = Math.sign(this.drone.position.x) * sideLimit;
+                    velocity.x = 0;
+                }
+            }
+
+            // Camera follow logic
+            if (this.cameraMode === 1) { // Follow behind
+                const behind = new BABYLON.Vector3(
+                    this.drone.position.x,
+                    this.drone.position.y + followHeight,
+                    this.drone.position.z - followDistance
+                );
+                
+                this.camera.position = BABYLON.Vector3.Lerp(
+                    this.camera.position,
+                    behind,
+                    0.1
+                );
+                
+                this.camera.setTarget(this.drone.position);
+            } 
+            else if (this.cameraMode === 2) { // Side view
+                const side = new BABYLON.Vector3(
+                    this.drone.position.x - sideViewDistance,
+                    this.drone.position.y + followHeight,
+                    this.drone.position.z
+                );
+                
+                this.camera.position = BABYLON.Vector3.Lerp(
+                    this.camera.position,
+                    side,
+                    0.1
+                );
+                
+                this.camera.setTarget(this.drone.position);
+            }
+
+            // Adjust propeller rotation based on state
+            for(let i = 0; i < 4; i++) {
+                const propeller = this.scene.getMeshByName(`propeller${i}`);
+                let baseSpeed = 0.2;
+                
+                if (this.isFlying) {
+                    if (isTransitioning) {
+                        // Faster during takeoff/landing
+                        baseSpeed = 0.4;
+                    } else {
+                        // Normal flying speed plus movement
+                        baseSpeed = 0.2 + (Math.abs(velocity.x) + Math.abs(velocity.y) + Math.abs(velocity.z)) * 0.2;
+                    }
+                } else {
+                    if (isTransitioning) {
+                        // Slowing down during landing
+                        baseSpeed = 0.3 * (this.drone.position.y - targetLandingHeight) / (hoverHeight - targetLandingHeight);
+                    } else {
+                        // Stopped
+                        baseSpeed = 0;
+                    }
+                }
+                
+                propeller.rotation.y += baseSpeed;
+            }
+        });
     }
 }
 
