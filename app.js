@@ -183,6 +183,24 @@ class XRScene {
         // Optional: Restrict camera movement for a more controlled experience
         this.camera.upperBetaLimit = Math.PI / 2;    // Limit looking up
         this.camera.lowerBetaLimit = -Math.PI / 2;   // Limit looking down
+
+        // Add finish line near the end of track
+        const finishLine = BABYLON.MeshBuilder.CreateGround("finishLine", {
+            width: this.trackWidth,
+            height: 0.5
+        }, this.scene);
+        
+        // Position it near the end of the track
+        finishLine.position.x = 0;
+        finishLine.position.y = this.trackElevation + this.trackHeight/2 + 0.01;
+        finishLine.position.z = this.trackLength/2 - 2; // 2 units from the end
+        
+        // Create red material for finish line
+        const finishLineMaterial = new BABYLON.StandardMaterial("finishLineMaterial", this.scene);
+        finishLineMaterial.diffuseColor = new BABYLON.Color3(1, 0, 0);
+        finishLineMaterial.emissiveColor = new BABYLON.Color3(0.5, 0, 0); // Add glow effect
+        finishLineMaterial.alpha = 0.8;
+        finishLine.material = finishLineMaterial;
     }
 
     createDrone() {
@@ -339,9 +357,16 @@ class XRScene {
         const followHeight = 2;
         const sideViewDistance = 8;
         
+        // Add track boundary
+        const finishLinePosition = this.trackLength/2 - 2;
+        const startPosition = -this.trackLength/2;
+        
         // Register frame-by-frame movement
         this.scene.registerBeforeRender(() => {
             if (!this.drone) return;
+
+            // Store previous position for boundary checking
+            const previousZ = this.drone.position.z;
 
             // Forward/Backward movement
             if (keysPressed["ArrowUp"]) {
@@ -392,6 +417,23 @@ class XRScene {
             this.drone.position.x += velocity.x;
             this.drone.position.y += velocity.y;
             this.drone.position.z += velocity.z;
+
+            // Check track boundaries and prevent going past them
+            if (this.drone.position.z > finishLinePosition) {
+                this.drone.position.z = finishLinePosition;
+                velocity.z = 0; // Stop forward momentum
+            }
+            if (this.drone.position.z < startPosition) {
+                this.drone.position.z = startPosition;
+                velocity.z = 0; // Stop backward momentum
+            }
+
+            // Side boundaries (optional, prevents falling off track sides)
+            const sideLimit = this.trackWidth/2 - 0.4; // Leave small margin
+            if (Math.abs(this.drone.position.x) > sideLimit) {
+                this.drone.position.x = Math.sign(this.drone.position.x) * sideLimit;
+                velocity.x = 0; // Stop sideways momentum
+            }
 
             // Add camera update logic after applying velocities
             if (this.cameraMode === 1) { // Follow behind
