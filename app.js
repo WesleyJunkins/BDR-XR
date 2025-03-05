@@ -388,18 +388,24 @@ class XRScene {
                 floorMeshes: [this.scene.getMeshByName("track")]
             });
 
-            // Enable XR button when available
-            this.xrButton.disabled = false;
-            
-            // Handle XR button click
-            this.xrButton.addEventListener("click", () => {
-                xrHelper.baseExperience.enterXRAsync("immersive-vr", "local-floor");
-            });
+            // Create 3D UI for VR
+            this.createVRUI(xrHelper);
 
-            // Update button text based on session state
-            xrHelper.baseExperience.onStateChanged.add((state) => {
+            // Handle initial VR camera position
+            xrHelper.baseExperience.onStateChangedObservable.add((state) => {
                 if (state === BABYLON.WebXRState.IN_XR) {
                     this.xrButton.textContent = "Exit XR";
+                    
+                    // Set initial VR camera position
+                    xrHelper.baseExperience.camera.position = new BABYLON.Vector3(
+                        0,
+                        this.trackElevation + 2.2, // Standing height
+                        -this.trackLength/2 + 4     // Near start of track
+                    );
+                    
+                    // Set forward direction
+                    const forward = new BABYLON.Vector3(0, 0, 1);
+                    xrHelper.baseExperience.camera.rotationQuaternion = BABYLON.Quaternion.FromEulerAngles(0, 0, 0);
                 } else {
                     this.xrButton.textContent = "Enter XR";
                 }
@@ -409,6 +415,80 @@ class XRScene {
             console.log("XR not available:", error);
             this.xrButton.textContent = "XR Not Available";
         }
+    }
+
+    createVRUI(xrHelper) {
+        // Create a 3D UI panel that follows the user
+        const manager = new BABYLON.GUI.GUI3DManager(this.scene);
+        const panel = new BABYLON.GUI.PlanePanel();
+        manager.addControl(panel);
+        panel.margin = 0.02;
+
+        // Position the panel in front of the user
+        panel.position = new BABYLON.Vector3(0, 1.5, 1);
+        panel.scaling = new BABYLON.Vector3(0.5, 0.5, 0.5);
+
+        // Create VR buttons
+        const viewButton = new BABYLON.GUI.HolographicButton("viewButton");
+        panel.addControl(viewButton);
+        viewButton.text = "Change View";
+
+        const flightButton = new BABYLON.GUI.HolographicButton("flightButton");
+        panel.addControl(flightButton);
+        flightButton.text = "Lift-Off";
+
+        const resetButton = new BABYLON.GUI.HolographicButton("resetButton");
+        panel.addControl(resetButton);
+        resetButton.text = "Reset";
+
+        // Add click handlers
+        viewButton.onPointerUpObservable.add(() => {
+            this.cameraMode = (this.cameraMode + 1) % 3;
+            if (this.cameraMode === 0) {
+                viewButton.text = "View: Stationary";
+            } else if (this.cameraMode === 1) {
+                viewButton.text = "View: Follow";
+            } else {
+                viewButton.text = "View: Side";
+            }
+        });
+
+        flightButton.onPointerUpObservable.add(() => {
+            if (!this.isFlying) {
+                this.isFlying = true;
+                flightButton.text = "Land";
+            } else {
+                this.isFlying = false;
+                flightButton.text = "Lift-Off";
+            }
+        });
+
+        resetButton.onPointerUpObservable.add(() => {
+            this.drone.position = this.initialDronePosition.clone();
+            this.isFlying = false;
+            flightButton.text = "Lift-Off";
+        });
+
+        // Make panel follow and face the user
+        this.scene.registerBeforeRender(() => {
+            if (xrHelper.baseExperience && xrHelper.baseExperience.camera) {
+                const camera = xrHelper.baseExperience.camera;
+                
+                // Position panel in front of user
+                panel.position = new BABYLON.Vector3(
+                    camera.position.x,
+                    camera.position.y,
+                    camera.position.z + 1
+                );
+                
+                // Make panel face user
+                panel.rotation = new BABYLON.Vector3(
+                    camera.rotation.x,
+                    camera.rotation.y,
+                    0
+                );
+            }
+        });
     }
 
     setupDroneControls() {
