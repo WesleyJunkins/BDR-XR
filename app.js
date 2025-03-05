@@ -727,5 +727,6 @@ class XRScene {
 
 // Initialize the XR scene when the window loads
 window.addEventListener("DOMContentLoaded", () => {
+    console.log("7");
     new XRScene();
 }); 
