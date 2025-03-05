@@ -3,7 +3,6 @@ class XRScene {
         // Get the canvas element
         this.canvas = document.getElementById("renderCanvas");
         this.engine = new BABYLON.Engine(this.canvas, true);
-        this.xrButton = document.getElementById("xr-button");
 
         // Create our scene
         this.createScene();
@@ -95,20 +94,20 @@ class XRScene {
 
         // Add floor texture
         trackMaterial.diffuseTexture = new BABYLON.Texture("assets/floor.png", this.scene);
-        trackMaterial.diffuseTexture.uScale = 4;  // Adjust texture tiling on width
-        trackMaterial.diffuseTexture.vScale = 40; // Adjust texture tiling on length
+        trackMaterial.diffuseTexture.uScale = 10;  // Increased from 4 to 10 for width
+        trackMaterial.diffuseTexture.vScale = 100; // Increased from 40 to 100 for length
 
         // Add bump texture for more realism
         trackMaterial.bumpTexture = new BABYLON.Texture("assets/floor_bump.PNG", this.scene);
-        trackMaterial.bumpTexture.uScale = 4;
-        trackMaterial.bumpTexture.vScale = 40;
+        trackMaterial.bumpTexture.uScale = 10;     // Match the diffuse texture scaling
+        trackMaterial.bumpTexture.vScale = 100;    // Match the diffuse texture scaling
 
         // Adjust material properties
-        trackMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1); // Reduce shininess
-        trackMaterial.specularPower = 64; // Adjust specular highlight
-        trackMaterial.useParallax = true; // Enable parallax mapping for more depth
-        trackMaterial.useParallaxOcclusion = true; // Enhanced parallax effect
-        trackMaterial.parallaxScaleBias = 0.1; // Adjust parallax effect strength
+        trackMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
+        trackMaterial.specularPower = 64;
+        trackMaterial.useParallax = true;
+        trackMaterial.useParallaxOcclusion = true;
+        trackMaterial.parallaxScaleBias = 0.1;
 
         track.material = trackMaterial;
 
@@ -394,26 +393,21 @@ class XRScene {
             // Handle initial VR camera position
             xrHelper.baseExperience.onStateChangedObservable.add((state) => {
                 if (state === BABYLON.WebXRState.IN_XR) {
-                    this.xrButton.textContent = "Exit XR";
-                    
                     // Set initial VR camera position
                     xrHelper.baseExperience.camera.position = new BABYLON.Vector3(
                         0,
-                        this.trackElevation + 2.2, // Standing height
-                        -this.trackLength/2 + 4     // Near start of track
+                        this.trackElevation + 2.2,
+                        -this.trackLength/2 + 4
                     );
                     
                     // Set forward direction
                     const forward = new BABYLON.Vector3(0, 0, 1);
                     xrHelper.baseExperience.camera.rotationQuaternion = BABYLON.Quaternion.FromEulerAngles(0, 0, 0);
-                } else {
-                    this.xrButton.textContent = "Enter XR";
                 }
             });
 
         } catch (error) {
             console.log("XR not available:", error);
-            this.xrButton.textContent = "XR Not Available";
         }
     }
 
@@ -820,6 +814,6 @@ class XRScene {
 
 // Initialize the XR scene when the window loads
 window.addEventListener("DOMContentLoaded", () => {
-    console.log("11");
+    console.log("12");
     new XRScene();
 }); 
