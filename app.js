@@ -681,9 +681,9 @@ class XRScene {
                 if (this.scene.activeCamera.inputSource?.xrInput) {
                     // In VR, move the scene root instead of the camera
                     const targetPosition = new BABYLON.Vector3(
-                        -this.drone.position.x,
-                        -this.drone.position.y - followHeight,
-                        -this.drone.position.z + followDistance
+                        -this.drone.absolutePosition.x,
+                        -this.drone.absolutePosition.y,
+                        -this.drone.absolutePosition.z + followDistance
                     );
                     
                     this.sceneRoot.position = BABYLON.Vector3.Lerp(
@@ -712,9 +712,9 @@ class XRScene {
                 if (this.scene.activeCamera.inputSource?.xrInput) {
                     // In VR, move the scene root instead of the camera
                     const targetPosition = new BABYLON.Vector3(
-                        -this.drone.position.x + sideViewDistance,
-                        -this.drone.position.y - followHeight,
-                        -this.drone.position.z
+                        -this.drone.absolutePosition.x + sideViewDistance,
+                        -this.drone.absolutePosition.y,
+                        -this.drone.absolutePosition.z
                     );
                     
                     this.sceneRoot.position = BABYLON.Vector3.Lerp(
@@ -741,9 +741,15 @@ class XRScene {
             }
             else if (this.cameraMode === 0 && this.scene.activeCamera.inputSource?.xrInput) {
                 // Reset scene position in stationary mode for VR
+                const targetPosition = new BABYLON.Vector3(
+                    0,
+                    0,
+                    0
+                );
+                
                 this.sceneRoot.position = BABYLON.Vector3.Lerp(
                     this.sceneRoot.position,
-                    BABYLON.Vector3.Zero(),
+                    targetPosition,
                     0.1
                 );
             }
@@ -814,6 +820,6 @@ class XRScene {
 
 // Initialize the XR scene when the window loads
 window.addEventListener("DOMContentLoaded", () => {
-    console.log("10");
+    console.log("11");
     new XRScene();
 }); 
