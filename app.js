@@ -778,21 +778,32 @@ class XRScene {
             const isInXR = this.scene.activeCamera?.inputSource?.xrInput;
             
             if (isInXR) {
-                // In XR mode, parent everything to scene root
+                // In XR mode, parent scene objects to scene root
                 this.scene.meshes.forEach(mesh => {
-                    if (mesh.name !== "camera" && !mesh.parent !== this.droneContainer) {
+                    // Don't parent camera or drone parts
+                    if (mesh.name !== "camera" && 
+                        !mesh.parent && 
+                        !mesh.name.includes("drone") && 
+                        !mesh.name.includes("propeller") && 
+                        !mesh.name.includes("arm")) {
                         mesh.parent = this.sceneRoot;
                     }
                 });
-                this.droneContainer.parent = this.sceneRoot;
+                // Parent the drone container to scene root
+                if (this.droneContainer && !this.droneContainer.parent) {
+                    this.droneContainer.parent = this.sceneRoot;
+                }
             } else {
-                // In non-XR mode, unparent everything
+                // In non-XR mode, unparent everything from scene root
                 this.scene.meshes.forEach(mesh => {
-                    if (mesh.name !== "camera" && !mesh.parent !== this.droneContainer) {
+                    if (mesh.parent === this.sceneRoot) {
                         mesh.parent = null;
                     }
                 });
-                this.droneContainer.parent = null;
+                // Unparent drone container
+                if (this.droneContainer && this.droneContainer.parent === this.sceneRoot) {
+                    this.droneContainer.parent = null;
+                }
                 
                 // Reset scene root position
                 this.sceneRoot.position = BABYLON.Vector3.Zero();
@@ -803,6 +814,6 @@ class XRScene {
 
 // Initialize the XR scene when the window loads
 window.addEventListener("DOMContentLoaded", () => {
-    console.log("9");
+    console.log("10");
     new XRScene();
 }); 
