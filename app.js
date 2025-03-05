@@ -205,15 +205,15 @@ class XRScene {
 
     createDrone() {
         // Create a parent transform node for the drone
-        const drone = new BABYLON.TransformNode("drone", this.scene);
+        this.droneContainer = new BABYLON.TransformNode("droneContainer", this.scene);
         
-        // Create the main body
+        // Create the main body and parent it to the container
         const body = BABYLON.MeshBuilder.CreateBox("droneBody", {
             width: 0.8,
             height: 0.2,
             depth: 0.8
         }, this.scene);
-        body.parent = drone;
+        body.parent = this.droneContainer;
 
         // Create material for the body
         const bodyMaterial = new BABYLON.StandardMaterial("bodyMaterial", this.scene);
@@ -238,7 +238,7 @@ class XRScene {
                 height: armHeight,
                 depth: armWidth
             }, this.scene);
-            arm.parent = drone;
+            arm.parent = this.droneContainer;
             arm.position = new BABYLON.Vector3(pos.x, 0, pos.z);
 
             // Create propeller
@@ -246,7 +246,7 @@ class XRScene {
                 height: 0.05,
                 diameter: 0.3
             }, this.scene);
-            propeller.parent = drone;
+            propeller.parent = this.droneContainer;
             propeller.position = new BABYLON.Vector3(pos.x, 0.1, pos.z);
 
             // Material for propellers
@@ -255,21 +255,21 @@ class XRScene {
             propeller.material = propMaterial;
         });
 
-        // Position the drone on the ground at start
+        // Position the drone container on the ground at start
         const cameraHeight = 2.2;
-        drone.position = new BABYLON.Vector3(
+        this.droneContainer.position = new BABYLON.Vector3(
             0,                                  // Centered on x-axis
             this.trackElevation + this.trackHeight/2 + 0.2, // Just above track surface
             -this.trackLength/2 + 8            // A few units in front of camera
         );
 
         // Store initial position for reset
-        this.initialDronePosition = drone.position.clone();
+        this.initialDronePosition = this.droneContainer.position.clone();
         this.flyingHeight = this.trackElevation + cameraHeight;
         this.isFlying = false;
 
         // Store drone reference for later use
-        this.drone = drone;
+        this.drone = this.droneContainer;
     }
 
     createGUI() {
@@ -481,12 +481,21 @@ class XRScene {
                     camera.position.z + 1
                 );
                 
-                // Make panel face user
-                panel.rotation = new BABYLON.Vector3(
-                    camera.rotation.x,
-                    camera.rotation.y,
-                    0
+                // Make panel always face the camera
+                const cameraPosition = camera.position;
+                const panelPosition = panel.position;
+                
+                // Calculate direction from panel to camera
+                const direction = cameraPosition.subtract(panelPosition);
+                
+                // Convert direction to rotation
+                const rotationQuaternion = BABYLON.Quaternion.FromLookDirectionLH(
+                    direction.normalize(),
+                    BABYLON.Vector3.Up()
                 );
+                
+                // Apply rotation
+                panel.rotationQuaternion = rotationQuaternion;
             }
         });
     }
@@ -530,6 +539,9 @@ class XRScene {
         let verticalTransitionVelocity = 0;
         const targetLandingHeight = this.trackElevation + this.trackHeight/2 + 0.2;
         const hoverHeight = this.flyingHeight;
+        
+        // Create a root node for the entire scene
+        this.sceneRoot = new BABYLON.TransformNode("sceneRoot", this.scene);
         
         this.scene.registerBeforeRender(() => {
             if (!this.drone) return;
@@ -664,36 +676,76 @@ class XRScene {
                 }
             }
 
-            // Camera follow logic
+            // Camera follow logic - modified for XR
             if (this.cameraMode === 1) { // Follow behind
-                const behind = new BABYLON.Vector3(
-                    this.drone.position.x,
-                    this.drone.position.y + followHeight,
-                    this.drone.position.z - followDistance
-                );
-                
-                this.camera.position = BABYLON.Vector3.Lerp(
-                    this.camera.position,
-                    behind,
-                    0.1
-                );
-                
-                this.camera.setTarget(this.drone.position);
+                if (this.scene.activeCamera.inputSource?.xrInput) {
+                    // In VR, move the scene root instead of the camera
+                    const targetPosition = new BABYLON.Vector3(
+                        -this.drone.position.x,
+                        -this.drone.position.y - followHeight,
+                        -this.drone.position.z + followDistance
+                    );
+                    
+                    this.sceneRoot.position = BABYLON.Vector3.Lerp(
+                        this.sceneRoot.position,
+                        targetPosition,
+                        0.1
+                    );
+                } else {
+                    // Regular camera follow for non-VR
+                    const behind = new BABYLON.Vector3(
+                        this.drone.position.x,
+                        this.drone.position.y + followHeight,
+                        this.drone.position.z - followDistance
+                    );
+                    
+                    this.camera.position = BABYLON.Vector3.Lerp(
+                        this.camera.position,
+                        behind,
+                        0.1
+                    );
+                    
+                    this.camera.setTarget(this.drone.position);
+                }
             } 
             else if (this.cameraMode === 2) { // Side view
-                const side = new BABYLON.Vector3(
-                    this.drone.position.x - sideViewDistance,
-                    this.drone.position.y + followHeight,
-                    this.drone.position.z
-                );
-                
-                this.camera.position = BABYLON.Vector3.Lerp(
-                    this.camera.position,
-                    side,
+                if (this.scene.activeCamera.inputSource?.xrInput) {
+                    // In VR, move the scene root instead of the camera
+                    const targetPosition = new BABYLON.Vector3(
+                        -this.drone.position.x + sideViewDistance,
+                        -this.drone.position.y - followHeight,
+                        -this.drone.position.z
+                    );
+                    
+                    this.sceneRoot.position = BABYLON.Vector3.Lerp(
+                        this.sceneRoot.position,
+                        targetPosition,
+                        0.1
+                    );
+                } else {
+                    // Regular side view for non-VR
+                    const side = new BABYLON.Vector3(
+                        this.drone.position.x - sideViewDistance,
+                        this.drone.position.y + followHeight,
+                        this.drone.position.z
+                    );
+                    
+                    this.camera.position = BABYLON.Vector3.Lerp(
+                        this.camera.position,
+                        side,
+                        0.1
+                    );
+                    
+                    this.camera.setTarget(this.drone.position);
+                }
+            }
+            else if (this.cameraMode === 0 && this.scene.activeCamera.inputSource?.xrInput) {
+                // Reset scene position in stationary mode for VR
+                this.sceneRoot.position = BABYLON.Vector3.Lerp(
+                    this.sceneRoot.position,
+                    BABYLON.Vector3.Zero(),
                     0.1
                 );
-                
-                this.camera.setTarget(this.drone.position);
             }
 
             // Adjust propeller rotation based on state
@@ -721,12 +773,36 @@ class XRScene {
                 
                 propeller.rotation.y += baseSpeed;
             }
+
+            // Handle XR mode changes
+            const isInXR = this.scene.activeCamera?.inputSource?.xrInput;
+            
+            if (isInXR) {
+                // In XR mode, parent everything to scene root
+                this.scene.meshes.forEach(mesh => {
+                    if (mesh.name !== "camera" && !mesh.parent !== this.droneContainer) {
+                        mesh.parent = this.sceneRoot;
+                    }
+                });
+                this.droneContainer.parent = this.sceneRoot;
+            } else {
+                // In non-XR mode, unparent everything
+                this.scene.meshes.forEach(mesh => {
+                    if (mesh.name !== "camera" && !mesh.parent !== this.droneContainer) {
+                        mesh.parent = null;
+                    }
+                });
+                this.droneContainer.parent = null;
+                
+                // Reset scene root position
+                this.sceneRoot.position = BABYLON.Vector3.Zero();
+            }
         });
     }
 }
 
 // Initialize the XR scene when the window loads
 window.addEventListener("DOMContentLoaded", () => {
-    console.log("7");
+    console.log("9");
     new XRScene();
 }); 
