@@ -514,15 +514,32 @@ class XRScene {
         const finishLinePosition = this.trackLength/2 - 2;
         const startPosition = -this.trackLength/2;
 
-        // Use the input manager's onControllerAddedObservable to set up controllers
+        // Store controller references
+        this.leftController = null;
+        this.rightController = null;
+
+        // Set up controller detection
         xrHelper.input.onControllerAddedObservable.add((controller) => {
             controller.onMotionControllerInitObservable.add((motionController) => {
-                // Controller is ready to use
                 console.log(`XR Controller ${motionController.handedness} initialized`);
+                if (motionController.handedness === 'left') {
+                    this.leftController = controller;
+                } else if (motionController.handedness === 'right') {
+                    this.rightController = controller;
+                }
             });
         });
 
-        // Handle movement in the scene's beforeRender loop instead of XR frame observable
+        // Clean up when controllers are removed
+        xrHelper.input.onControllerRemovedObservable.add((controller) => {
+            if (controller === this.leftController) {
+                this.leftController = null;
+            } else if (controller === this.rightController) {
+                this.rightController = null;
+            }
+        });
+
+        // Handle movement in the scene's beforeRender loop
         this.scene.onBeforeRenderObservable.add(() => {
             if (!this.isFlying) {
                 // Reset velocities when not flying
@@ -532,13 +549,10 @@ class XRScene {
                 return;
             }
 
-            const xrInput = xrHelper.input;
-            
             try {
                 // Handle left controller
-                const leftController = xrInput.getController("left");
-                if (leftController?.motionController) {
-                    const leftStick = leftController.motionController.getComponent("thumbstick");
+                if (this.leftController?.motionController) {
+                    const leftStick = this.leftController.motionController.getComponent("thumbstick");
                     if (leftStick) {
                         // Smoothly update velocities
                         this.xrVelocity.x = BABYLON.Scalar.Lerp(
@@ -553,15 +567,16 @@ class XRScene {
                         );
 
                         // Update drone rotation
-                        this.drone.rotation.z = -maxTilt * (this.xrVelocity.x / maxSpeed);
-                        this.drone.rotation.x = maxTilt * (this.xrVelocity.z / maxSpeed);
+                        if (this.drone) {
+                            this.drone.rotation.z = -maxTilt * (this.xrVelocity.x / maxSpeed);
+                            this.drone.rotation.x = maxTilt * (this.xrVelocity.z / maxSpeed);
+                        }
                     }
                 }
 
                 // Handle right controller
-                const rightController = xrInput.getController("right");
-                if (rightController?.motionController) {
-                    const rightStick = rightController.motionController.getComponent("thumbstick");
+                if (this.rightController?.motionController) {
+                    const rightStick = this.rightController.motionController.getComponent("thumbstick");
                     if (rightStick) {
                         // Smoothly update vertical velocity
                         this.xrVelocity.y = BABYLON.Scalar.Lerp(
