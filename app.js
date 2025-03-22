@@ -418,7 +418,7 @@ class XRScene {
         manager.addControl(panel);
         panel.margin = 0.02;
 
-        // Initial position doesn't matter as much since it will be updated
+        // Initial scaling
         panel.scaling = new BABYLON.Vector3(0.5, 0.5, 0.5);
 
         // Create VR buttons
@@ -467,27 +467,24 @@ class XRScene {
             if (xrHelper.baseExperience && xrHelper.baseExperience.camera) {
                 const camera = xrHelper.baseExperience.camera;
                 
-                // Calculate position relative to camera's view direction
+                // Get camera's forward direction
                 const forward = camera.getForwardRay().direction;
-                const right = BABYLON.Vector3.Cross(forward, BABYLON.Vector3.Up());
                 
-                // Position panel below and in front of the user
-                const targetPosition = new BABYLON.Vector3();
-                camera.position.copyTo(targetPosition);
-                
-                // Offset down and forward
-                targetPosition.addInPlace(BABYLON.Vector3.Up().scale(-0.7)); // Move down
-                targetPosition.addInPlace(forward.scale(0.3));               // Move forward slightly
+                // Calculate position below and in front of the user
+                const targetPosition = new BABYLON.Vector3(
+                    camera.position.x,
+                    camera.position.y - 0.7,  // Position below camera
+                    camera.position.z
+                ).add(forward.scale(0.5));    // Move slightly forward
                 
                 // Update panel position with lerp for smoothness
                 panel.position = BABYLON.Vector3.Lerp(
-                    panel.position,
+                    panel.position || targetPosition.clone(),  // Handle initial undefined position
                     targetPosition,
-                    0.3  // Increased lerp speed for more responsive movement
+                    0.3
                 );
                 
-                // Calculate rotation to face user
-                const directionToCamera = camera.position.subtract(panel.position);
+                // Make panel face the user
                 const rotationMatrix = BABYLON.Matrix.LookAtLH(
                     panel.position,
                     camera.position,
@@ -498,7 +495,7 @@ class XRScene {
                 const rotation = BABYLON.Quaternion.FromRotationMatrix(rotationMatrix);
                 rotation.multiplyInPlace(BABYLON.Quaternion.RotationAxis(
                     BABYLON.Vector3.Right(),
-                    Math.PI / 3  // Adjusted tilt angle
+                    Math.PI / 3
                 ));
                 
                 panel.rotationQuaternion = rotation;
