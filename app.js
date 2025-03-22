@@ -474,7 +474,7 @@ class XRScene {
                 const targetPosition = new BABYLON.Vector3(
                     camera.position.x + 1.5,
                     camera.position.y - 0.7,  // Position below camera
-                    camera.position.z - 2.0
+                    camera.position.z - 0.0
                 ).add(forward.scale(0.5));    // Move slightly forward
                 
                 // Update panel position with lerp for smoothness
