@@ -473,37 +473,59 @@ class XRScene {
         // Add Nudge Forward button handler
         nudgeButton.onPointerUpObservable.add(() => {
             if (this.drone && this.isFlying) {
-                // Calculate forward movement based on track boundaries
-                const currentZ = this.drone.position.z;
-                const finishLinePosition = this.trackLength/2 - 2;
-                const nudgeAmount = 2.0; // Amount to move forward
-
-                // Only nudge if we won't exceed the track boundary
-                if (currentZ + nudgeAmount <= finishLinePosition) {
-                    this.drone.position.z += nudgeAmount;
-                } else {
-                    // Move to finish line if nudge would exceed it
-                    this.drone.position.z = finishLinePosition;
+                // Initialize nudge animation if not exists
+                if (!this.nudgeState) {
+                    this.nudgeState = {
+                        velocity: 0,
+                        isNudging: false,
+                        acceleration: 0.05,  // Acceleration rate
+                        deceleration: 0.02,  // Deceleration rate
+                        maxVelocity: 0.3     // Max velocity during nudge
+                    };
                 }
 
-                // Add a small upward bump for visual feedback
-                const currentY = this.drone.position.y;
-                const bumpAnimation = new BABYLON.Animation(
-                    "bumpAnimation",
-                    "position.y",
-                    30,
-                    BABYLON.Animation.ANIMATIONTYPE_FLOAT,
-                    BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE
-                );
+                // Start the nudge
+                this.nudgeState.isNudging = true;
+                
+                // Create an observer for the nudge physics
+                if (!this.nudgeObserver) {
+                    this.nudgeObserver = this.scene.onBeforeRenderObservable.add(() => {
+                        if (!this.nudgeState.isNudging) return;
 
-                const keyFrames = [];
-                keyFrames.push({ frame: 0, value: currentY });
-                keyFrames.push({ frame: 15, value: currentY + 0.3 });
-                keyFrames.push({ frame: 30, value: currentY });
+                        const finishLinePosition = this.trackLength/2 - 2;
+                        const currentZ = this.drone.position.z;
 
-                bumpAnimation.setKeys(keyFrames);
-                this.drone.animations = [bumpAnimation];
-                this.scene.beginAnimation(this.drone, 0, 30, false);
+                        // Apply acceleration phase
+                        if (this.nudgeState.velocity < this.nudgeState.maxVelocity) {
+                            this.nudgeState.velocity += this.nudgeState.acceleration;
+                            // Add slight upward tilt during acceleration
+                            this.drone.rotation.x = Math.min(0.15, this.nudgeState.velocity * 0.5);
+                        } else {
+                            // Apply deceleration phase
+                            this.nudgeState.velocity = Math.max(0, this.nudgeState.velocity - this.nudgeState.deceleration);
+                            // Gradually remove tilt
+                            this.drone.rotation.x = Math.max(0, this.drone.rotation.x - 0.01);
+                        }
+
+                        // Move drone forward
+                        if (currentZ + this.nudgeState.velocity <= finishLinePosition) {
+                            this.drone.position.z += this.nudgeState.velocity;
+                        } else {
+                            this.drone.position.z = finishLinePosition;
+                            this.nudgeState.isNudging = false;
+                        }
+
+                        // Add subtle hovering effect during nudge
+                        this.drone.position.y += Math.sin(this.scene.getEngine().getDeltaTime() * 0.01) * 0.001;
+
+                        // Stop nudging when velocity is very low
+                        if (this.nudgeState.velocity < 0.01) {
+                            this.nudgeState.isNudging = false;
+                            this.nudgeState.velocity = 0;
+                            this.drone.rotation.x = 0; // Reset tilt
+                        }
+                    });
+                }
             }
         });
 
