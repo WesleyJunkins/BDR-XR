@@ -419,7 +419,7 @@ class XRScene {
         panel.margin = 0.02;
 
         // Position the panel below and in front of the user
-        panel.position = new BABYLON.Vector3(0, -0.5, 1); // Lowered position
+        panel.position = new BABYLON.Vector3(0, -0.7, 0.5); // Adjusted position to be closer and centered
         panel.scaling = new BABYLON.Vector3(0.5, 0.5, 0.5);
 
         // Create VR buttons
@@ -471,15 +471,12 @@ class XRScene {
                 // Get camera's forward direction
                 const forward = camera.getForwardRay().direction;
                 
-                // Calculate position below and in front of camera
+                // Calculate position below and centered with camera
                 const targetPosition = new BABYLON.Vector3(
-                    camera.position.x,
-                    camera.position.y - 0.7, // Position below camera
-                    camera.position.z
+                    camera.position.x,          // Centered with camera
+                    camera.position.y - 0.7,    // Below camera
+                    camera.position.z + 0.5     // Slightly in front
                 );
-                
-                // Add slight offset in the forward direction
-                targetPosition.addInPlace(forward.scale(0.5));
                 
                 // Update panel position with lerp for smoothness
                 panel.position = BABYLON.Vector3.Lerp(
@@ -829,6 +826,6 @@ class XRScene {
 
 // Initialize the XR scene when the window loads
 window.addEventListener("DOMContentLoaded", () => {
-    console.log("13");
+    console.log("14");
     new XRScene();
 }); 
