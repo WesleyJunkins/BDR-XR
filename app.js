@@ -474,7 +474,7 @@ class XRScene {
                 const targetPosition = new BABYLON.Vector3(
                     camera.position.x + 1.80,
                     camera.position.y - 0.75,  // Position below camera
-                    camera.position.z
+                    camera.position.z - 0.5
                 ).add(forward.scale(0.5));    // Move slightly forward
                 
                 // Update panel position with lerp for smoothness
@@ -491,11 +491,17 @@ class XRScene {
                     BABYLON.Vector3.Up()
                 );
                 
-                // Apply rotation with tilt
+                // Apply rotation with adjusted tilt
                 const rotation = BABYLON.Quaternion.FromRotationMatrix(rotationMatrix);
                 rotation.multiplyInPlace(BABYLON.Quaternion.RotationAxis(
                     BABYLON.Vector3.Right(),
-                    Math.PI / 3
+                    Math.PI / 3.5  // Changed from Math.PI / 3 to Math.PI / 3.5 for ~25 degrees tilt
+                ));
+                
+                // Add additional rotation to face more towards camera
+                rotation.multiplyInPlace(BABYLON.Quaternion.RotationAxis(
+                    BABYLON.Vector3.Up(),
+                    Math.PI / 12  // Add slight rotation around Y axis
                 ));
                 
                 panel.rotationQuaternion = rotation;
