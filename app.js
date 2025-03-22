@@ -419,10 +419,10 @@ class XRScene {
         const manager = new BABYLON.GUI.GUI3DManager(this.scene);
         const panel = new BABYLON.GUI.PlanePanel();
         manager.addControl(panel);
-        panel.margin = 0.01; // Reduced margin
+        panel.margin = 0.01;
 
-        // Initial scaling - reduced by half
-        panel.scaling = new BABYLON.Vector3(0.25, 0.25, 0.25); // Changed from 0.5 to 0.25
+        // Initial scaling
+        panel.scaling = new BABYLON.Vector3(0.25, 0.25, 0.25);
 
         // Create VR buttons
         const viewButton = new BABYLON.GUI.HolographicButton("viewButton");
@@ -436,6 +436,11 @@ class XRScene {
         const resetButton = new BABYLON.GUI.HolographicButton("resetButton");
         panel.addControl(resetButton);
         resetButton.text = "Reset";
+
+        // Add new Nudge Forward button
+        const nudgeButton = new BABYLON.GUI.HolographicButton("nudgeButton");
+        panel.addControl(nudgeButton);
+        nudgeButton.text = "Nudge Forward";
 
         // Add click handlers
         viewButton.onPointerUpObservable.add(() => {
@@ -465,6 +470,43 @@ class XRScene {
             flightButton.text = "Lift-Off";
         });
 
+        // Add Nudge Forward button handler
+        nudgeButton.onPointerUpObservable.add(() => {
+            if (this.drone && this.isFlying) {
+                // Calculate forward movement based on track boundaries
+                const currentZ = this.drone.position.z;
+                const finishLinePosition = this.trackLength/2 - 2;
+                const nudgeAmount = 2.0; // Amount to move forward
+
+                // Only nudge if we won't exceed the track boundary
+                if (currentZ + nudgeAmount <= finishLinePosition) {
+                    this.drone.position.z += nudgeAmount;
+                } else {
+                    // Move to finish line if nudge would exceed it
+                    this.drone.position.z = finishLinePosition;
+                }
+
+                // Add a small upward bump for visual feedback
+                const currentY = this.drone.position.y;
+                const bumpAnimation = new BABYLON.Animation(
+                    "bumpAnimation",
+                    "position.y",
+                    30,
+                    BABYLON.Animation.ANIMATIONTYPE_FLOAT,
+                    BABYLON.Animation.ANIMATIONLOOPMODE_CYCLE
+                );
+
+                const keyFrames = [];
+                keyFrames.push({ frame: 0, value: currentY });
+                keyFrames.push({ frame: 15, value: currentY + 0.3 });
+                keyFrames.push({ frame: 30, value: currentY });
+
+                bumpAnimation.setKeys(keyFrames);
+                this.drone.animations = [bumpAnimation];
+                this.scene.beginAnimation(this.drone, 0, 30, false);
+            }
+        });
+
         // Make panel follow and face the user
         this.scene.registerBeforeRender(() => {
             if (xrHelper.baseExperience && xrHelper.baseExperience.camera) {
@@ -476,13 +518,13 @@ class XRScene {
                 // Calculate position below and in front of the user
                 const targetPosition = new BABYLON.Vector3(
                     camera.position.x + 1.5,
-                    camera.position.y - 0.7,  // Position below camera
+                    camera.position.y - 0.7,
                     camera.position.z + 1.0
-                ).add(forward.scale(0.5));    // Move slightly forward
+                ).add(forward.scale(0.5));
                 
                 // Update panel position with lerp for smoothness
                 panel.position = BABYLON.Vector3.Lerp(
-                    panel.position || targetPosition.clone(),  // Handle initial undefined position
+                    panel.position || targetPosition.clone(),
                     targetPosition,
                     0.3
                 );
