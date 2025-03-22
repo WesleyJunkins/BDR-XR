@@ -419,7 +419,7 @@ class XRScene {
         panel.margin = 0.02;
 
         // Position the panel below and in front of the user
-        panel.position = new BABYLON.Vector3(0, -0.7, 0.5); // Adjusted position to be closer and centered
+        panel.position = new BABYLON.Vector3(0, -1.7, 0.5); // Adjusted position to be closer and centered
         panel.scaling = new BABYLON.Vector3(0.5, 0.5, 0.5);
 
         // Create VR buttons
