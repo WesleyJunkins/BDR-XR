@@ -478,9 +478,9 @@ class XRScene {
                     this.nudgeState = {
                         velocity: 0,
                         isNudging: false,
-                        acceleration: 0.05,  // Acceleration rate
-                        deceleration: 0.02,  // Deceleration rate
-                        maxVelocity: 0.3     // Max velocity during nudge
+                        acceleration: 0.025,    // Reduced from 0.05
+                        deceleration: 0.01,    // Reduced from 0.02
+                        maxVelocity: 0.15      // Reduced from 0.3
                     };
                 }
 
