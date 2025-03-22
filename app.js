@@ -518,67 +518,66 @@ class XRScene {
         this.leftController = null;
         this.rightController = null;
 
-        // Set up controller detection
+        // Disable default controller behavior
+        xrHelper.baseExperience.camera.checkCollisions = false;
+        xrHelper.input.xrCamera.checkCollisions = false;
+        
+        // Disable default controller movement
         xrHelper.input.onControllerAddedObservable.add((controller) => {
+            // Disable default movement/rotation behavior
             controller.onMotionControllerInitObservable.add((motionController) => {
                 console.log(`XR Controller ${motionController.handedness} initialized`);
+                
+                // Store controller reference
                 if (motionController.handedness === 'left') {
                     this.leftController = controller;
                 } else if (motionController.handedness === 'right') {
                     this.rightController = controller;
                 }
-            });
-        });
 
-        // Clean up when controllers are removed
-        xrHelper.input.onControllerRemovedObservable.add((controller) => {
-            if (controller === this.leftController) {
-                this.leftController = null;
-            } else if (controller === this.rightController) {
-                this.rightController = null;
-            }
+                // Disable default thumbstick behavior
+                const thumbstick = motionController.getComponent("thumbstick");
+                if (thumbstick) {
+                    thumbstick.onAxisValueChangedObservable.clear(); // Clear default behaviors
+                    controller.onAxisValueChangedObservable.clear(); // Clear controller level behaviors
+                }
+            });
         });
 
         // Handle movement in the scene's beforeRender loop
         this.scene.onBeforeRenderObservable.add(() => {
-            if (!this.isFlying) {
-                // Reset velocities when not flying
-                this.xrVelocity.x = 0;
-                this.xrVelocity.y = 0;
-                this.xrVelocity.z = 0;
-                return;
-            }
+            if (!this.isFlying || !this.drone) return;
 
             try {
-                // Handle left controller
+                // Handle left controller for forward/backward and left/right movement
                 if (this.leftController?.motionController) {
                     const leftStick = this.leftController.motionController.getComponent("thumbstick");
                     if (leftStick) {
-                        // Smoothly update velocities
-                        this.xrVelocity.x = BABYLON.Scalar.Lerp(
-                            this.xrVelocity.x,
-                            leftStick.axes.x * maxSpeed,
-                            0.1
-                        );
+                        // Forward/Backward (Z-axis)
                         this.xrVelocity.z = BABYLON.Scalar.Lerp(
                             this.xrVelocity.z,
-                            -leftStick.axes.y * maxSpeed,
+                            -leftStick.axes.y * maxSpeed, // Forward/Backward
                             0.1
                         );
 
-                        // Update drone rotation
-                        if (this.drone) {
-                            this.drone.rotation.z = -maxTilt * (this.xrVelocity.x / maxSpeed);
-                            this.drone.rotation.x = maxTilt * (this.xrVelocity.z / maxSpeed);
-                        }
+                        // Left/Right (X-axis)
+                        this.xrVelocity.x = BABYLON.Scalar.Lerp(
+                            this.xrVelocity.x,
+                            leftStick.axes.x * maxSpeed, // Left/Right
+                            0.1
+                        );
+
+                        // Update drone tilt
+                        this.drone.rotation.x = maxTilt * (this.xrVelocity.z / maxSpeed);
+                        this.drone.rotation.z = -maxTilt * (this.xrVelocity.x / maxSpeed);
                     }
                 }
 
-                // Handle right controller
+                // Handle right controller for up/down movement
                 if (this.rightController?.motionController) {
                     const rightStick = this.rightController.motionController.getComponent("thumbstick");
                     if (rightStick) {
-                        // Smoothly update vertical velocity
+                        // Up/Down (Y-axis)
                         this.xrVelocity.y = BABYLON.Scalar.Lerp(
                             this.xrVelocity.y,
                             -rightStick.axes.y * maxSpeed * 0.5,
@@ -587,29 +586,27 @@ class XRScene {
                     }
                 }
 
-                // Apply movement with boundary checks
-                if (this.drone) {
-                    // Update position
-                    this.drone.position.x += this.xrVelocity.x;
-                    this.drone.position.y += this.xrVelocity.y;
-                    this.drone.position.z += this.xrVelocity.z;
+                // Apply movement
+                this.drone.position.x += this.xrVelocity.x;
+                this.drone.position.y += this.xrVelocity.y;
+                this.drone.position.z += this.xrVelocity.z;
 
-                    // Apply boundaries
-                    if (this.drone.position.z > finishLinePosition) {
-                        this.drone.position.z = finishLinePosition;
-                        this.xrVelocity.z = 0;
-                    }
-                    if (this.drone.position.z < startPosition) {
-                        this.drone.position.z = startPosition;
-                        this.xrVelocity.z = 0;
-                    }
-
-                    const sideLimit = this.trackWidth/2 - 0.4;
-                    if (Math.abs(this.drone.position.x) > sideLimit) {
-                        this.drone.position.x = Math.sign(this.drone.position.x) * sideLimit;
-                        this.xrVelocity.x = 0;
-                    }
+                // Apply boundaries
+                if (this.drone.position.z > finishLinePosition) {
+                    this.drone.position.z = finishLinePosition;
+                    this.xrVelocity.z = 0;
                 }
+                if (this.drone.position.z < startPosition) {
+                    this.drone.position.z = startPosition;
+                    this.xrVelocity.z = 0;
+                }
+
+                const sideLimit = this.trackWidth/2 - 0.4;
+                if (Math.abs(this.drone.position.x) > sideLimit) {
+                    this.drone.position.x = Math.sign(this.drone.position.x) * sideLimit;
+                    this.xrVelocity.x = 0;
+                }
+
             } catch (error) {
                 console.warn("XR controller update error:", error);
             }
