@@ -818,6 +818,72 @@ class XRScene {
                 this.sceneRoot.position = BABYLON.Vector3.Zero();
             }
         });
+
+        // Add XR controller input handling
+        let leftController = null;
+        let rightController = null;
+
+        // Set up XR input sources
+        this.scene.onXRFrameObservable.add((xrFrame) => {
+            if (!this.isFlying) return;
+
+            const xrInput = this.scene.xrSessionManager.session.inputSources;
+
+            for (let input of xrInput) {
+                // Get controller data
+                if (input.handedness === 'left') {
+                    leftController = input;
+                }
+                if (input.handedness === 'right') {
+                    rightController = input;
+                }
+
+                // Handle gamepad input
+                if (input.gamepad) {
+                    const gamepad = input.gamepad;
+                    
+                    // Left controller (movement)
+                    if (input.handedness === 'left' && gamepad.axes.length >= 2) {
+                        // X axis (left/right)
+                        velocity.x = Math.min(Math.max(gamepad.axes[0] * maxSpeed, -maxSpeed), maxSpeed);
+                        this.drone.rotation.z = -maxTilt * (velocity.x / maxSpeed);
+
+                        // Y axis (forward/backward)
+                        velocity.z = Math.min(Math.max(-gamepad.axes[1] * maxSpeed, -maxSpeed), maxSpeed);
+                        this.drone.rotation.x = maxTilt * (velocity.z / maxSpeed);
+                    }
+
+                    // Right controller (vertical movement)
+                    if (input.handedness === 'right' && gamepad.axes.length >= 2) {
+                        // Y axis for up/down movement
+                        velocity.y = Math.min(Math.max(-gamepad.axes[1] * maxSpeed * 0.5, -maxSpeed), maxSpeed);
+                    }
+                }
+            }
+
+            // Apply velocities if flying
+            if (this.isFlying) {
+                this.drone.position.x += velocity.x;
+                this.drone.position.y += velocity.y;
+                this.drone.position.z += velocity.z;
+
+                // Apply existing boundary checks
+                if (this.drone.position.z > finishLinePosition) {
+                    this.drone.position.z = finishLinePosition;
+                    velocity.z = 0;
+                }
+                if (this.drone.position.z < startPosition) {
+                    this.drone.position.z = startPosition;
+                    velocity.z = 0;
+                }
+
+                const sideLimit = this.trackWidth/2 - 0.4;
+                if (Math.abs(this.drone.position.x) > sideLimit) {
+                    this.drone.position.x = Math.sign(this.drone.position.x) * sideLimit;
+                    velocity.x = 0;
+                }
+            }
+        });
     }
 }
 
