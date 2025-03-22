@@ -416,10 +416,10 @@ class XRScene {
         const manager = new BABYLON.GUI.GUI3DManager(this.scene);
         const panel = new BABYLON.GUI.PlanePanel();
         manager.addControl(panel);
-        panel.margin = 0.02;
+        panel.margin = 0.01; // Reduced margin
 
-        // Initial scaling
-        panel.scaling = new BABYLON.Vector3(0.5, 0.5, 0.5);
+        // Initial scaling - reduced by half
+        panel.scaling = new BABYLON.Vector3(0.25, 0.25, 0.25); // Changed from 0.5 to 0.25
 
         // Create VR buttons
         const viewButton = new BABYLON.GUI.HolographicButton("viewButton");
@@ -491,17 +491,11 @@ class XRScene {
                     BABYLON.Vector3.Up()
                 );
                 
-                // Apply rotation with adjusted tilt
+                // Apply rotation with tilt
                 const rotation = BABYLON.Quaternion.FromRotationMatrix(rotationMatrix);
                 rotation.multiplyInPlace(BABYLON.Quaternion.RotationAxis(
                     BABYLON.Vector3.Right(),
-                    Math.PI / 3.5  // Changed from Math.PI / 3 to Math.PI / 3.5 for ~25 degrees tilt
-                ));
-                
-                // Add additional rotation to face more towards camera
-                rotation.multiplyInPlace(BABYLON.Quaternion.RotationAxis(
-                    BABYLON.Vector3.Up(),
-                    Math.PI / 12  // Add slight rotation around Y axis
+                    Math.PI / 3
                 ));
                 
                 panel.rotationQuaternion = rotation;
