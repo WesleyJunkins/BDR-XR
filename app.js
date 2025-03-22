@@ -472,7 +472,7 @@ class XRScene {
                 
                 // Calculate position below and in front of the user
                 const targetPosition = new BABYLON.Vector3(
-                    camera.position.x,
+                    camera.position.x + 1.0,
                     camera.position.y - 0.0,  // Position below camera
                     camera.position.z
                 ).add(forward.scale(0.5));    // Move slightly forward
