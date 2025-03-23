@@ -475,9 +475,9 @@ class XRScene {
     createVRUI(xrHelper) {
         // Add panel position offset that we can adjust
         this.panelOffset = {
-            x: -2.0,
-            y: -0.6,
-            z: 1.6
+            x: 1.90,
+            y: -0.80,
+            z: 1.00
         };
 
         // Add keyboard controls for panel position
