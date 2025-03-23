@@ -414,25 +414,65 @@ class XRScene {
                     if (!this.xrCameraFollow) {
                         this.xrCameraFollow = this.scene.onBeforeRenderObservable.add(() => {
                             if (xrHelper.baseExperience.state === BABYLON.WebXRState.IN_XR) {
-                                // Calculate target position behind drone
-                                const targetPosition = new BABYLON.Vector3(
-                                    this.drone.position.x,
-                                    this.drone.position.y + followHeight,
-                                    this.drone.position.z - followDistance
-                                );
+                                const followDistance = 5;
+                                const followHeight = 2;
+                                const sideViewDistance = 8;
+                                let targetPosition;
+                                let lookAtTarget;
 
-                                // Smoothly move XR camera to follow position
+                                // Different camera positions based on mode
+                                switch (this.cameraMode) {
+                                    case 0: // Stationary
+                                        // Position at start of track
+                                        targetPosition = new BABYLON.Vector3(
+                                            0,
+                                            this.trackElevation + followHeight,
+                                            -this.trackLength/2 + 4
+                                        );
+                                        // Look at middle of track
+                                        lookAtTarget = new BABYLON.Vector3(
+                                            0,
+                                            this.trackElevation + 2.0,
+                                            this.trackLength/2
+                                        );
+                                        break;
+
+                                    case 1: // Follow
+                                        // Position behind drone
+                                        targetPosition = new BABYLON.Vector3(
+                                            this.drone.position.x,
+                                            this.drone.position.y + followHeight,
+                                            this.drone.position.z - followDistance
+                                        );
+                                        // Look at drone
+                                        lookAtTarget = new BABYLON.Vector3(
+                                            this.drone.position.x,
+                                            this.drone.position.y,
+                                            this.drone.position.z
+                                        );
+                                        break;
+
+                                    case 2: // Side view
+                                        // Position to the side of drone
+                                        targetPosition = new BABYLON.Vector3(
+                                            this.drone.position.x - sideViewDistance,
+                                            this.drone.position.y + followHeight,
+                                            this.drone.position.z
+                                        );
+                                        // Look at drone
+                                        lookAtTarget = new BABYLON.Vector3(
+                                            this.drone.position.x,
+                                            this.drone.position.y,
+                                            this.drone.position.z
+                                        );
+                                        break;
+                                }
+
+                                // Smoothly move XR camera to target position
                                 xrHelper.baseExperience.camera.position = BABYLON.Vector3.Lerp(
                                     xrHelper.baseExperience.camera.position,
                                     targetPosition,
-                                    0.1
-                                );
-
-                                // Make camera look at drone
-                                const lookAtTarget = new BABYLON.Vector3(
-                                    this.drone.position.x,
-                                    this.drone.position.y,
-                                    this.drone.position.z
+                                    0.05  // Reduced from 0.1 for smoother transition
                                 );
 
                                 // Create look-at matrix
@@ -442,9 +482,21 @@ class XRScene {
                                     BABYLON.Vector3.Up()
                                 );
 
-                                // Convert to quaternion and apply rotation
-                                const rotationQuaternion = BABYLON.Quaternion.FromRotationMatrix(lookAt);
-                                xrHelper.baseExperience.camera.rotationQuaternion = rotationQuaternion;
+                                // Convert to quaternion and apply rotation with smooth interpolation
+                                const targetRotation = BABYLON.Quaternion.FromRotationMatrix(lookAt);
+                                
+                                // Initialize rotationQuaternion if not set
+                                if (!xrHelper.baseExperience.camera.rotationQuaternion) {
+                                    xrHelper.baseExperience.camera.rotationQuaternion = targetRotation;
+                                } else {
+                                    // Smooth rotation interpolation
+                                    BABYLON.Quaternion.SlerpToRef(
+                                        xrHelper.baseExperience.camera.rotationQuaternion,
+                                        targetRotation,
+                                        0.05,
+                                        xrHelper.baseExperience.camera.rotationQuaternion
+                                    );
+                                }
                             }
                         });
                     }
