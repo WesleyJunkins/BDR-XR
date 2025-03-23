@@ -659,12 +659,6 @@ class XRScene {
                     targetPosition,
                     0.3
                 );
-                
-                // Make panel face the camera
-                panel.lookAt(camera.position);
-                
-                // Apply tilt
-                panel.rotate(BABYLON.Vector3.Right(), Math.PI / 3);
             }
         });
     }
