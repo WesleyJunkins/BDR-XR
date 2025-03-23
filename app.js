@@ -523,6 +523,44 @@ class XRScene {
     }
 
     createVRUI(xrHelper) {
+        // Add panel position offset that we can adjust
+        this.panelOffset = {
+            x: 1.5,
+            y: -0.5,
+            z: 1.5
+        };
+
+        // Add keyboard controls for panel position
+        window.addEventListener("keydown", (e) => {
+            const adjustmentAmount = 0.1;
+            switch(e.key.toLowerCase()) {
+                case 'q':
+                    this.panelOffset.x += adjustmentAmount;
+                    console.log(`Panel X offset: ${this.panelOffset.x.toFixed(2)}`);
+                    break;
+                case 'a':
+                    this.panelOffset.x -= adjustmentAmount;
+                    console.log(`Panel X offset: ${this.panelOffset.x.toFixed(2)}`);
+                    break;
+                case 'w':
+                    this.panelOffset.y += adjustmentAmount;
+                    console.log(`Panel Y offset: ${this.panelOffset.y.toFixed(2)}`);
+                    break;
+                case 's':
+                    this.panelOffset.y -= adjustmentAmount;
+                    console.log(`Panel Y offset: ${this.panelOffset.y.toFixed(2)}`);
+                    break;
+                case 'e':
+                    this.panelOffset.z += adjustmentAmount;
+                    console.log(`Panel Z offset: ${this.panelOffset.z.toFixed(2)}`);
+                    break;
+                case 'd':
+                    this.panelOffset.z -= adjustmentAmount;
+                    console.log(`Panel Z offset: ${this.panelOffset.z.toFixed(2)}`);
+                    break;
+            }
+        });
+
         // Create a 3D UI panel that follows the user
         const manager = new BABYLON.GUI.GUI3DManager(this.scene);
         const panel = new BABYLON.GUI.PlanePanel();
@@ -646,7 +684,7 @@ class XRScene {
             }
         });
 
-        // Make panel follow and face the user
+        // Update the panel follow behavior to use the offset values
         this.scene.registerBeforeRender(() => {
             if (xrHelper.baseExperience && xrHelper.baseExperience.camera) {
                 const camera = xrHelper.baseExperience.camera;
@@ -655,12 +693,11 @@ class XRScene {
                 const forward = camera.getForwardRay().direction;
                 const right = BABYLON.Vector3.Cross(forward, BABYLON.Vector3.Up()).normalize();
                 
-                // Calculate position relative to camera's current orientation
-                // This ensures the panel stays in front regardless of camera rotation
+                // Calculate position relative to camera's current orientation using offsets
                 const targetPosition = new BABYLON.Vector3(
-                    camera.position.x + (forward.x + right.x) * 5.7,
-                    camera.position.y - 0.5,  // Keep panel below eye level
-                    camera.position.z + (forward.z + right.z) * 1.5
+                    camera.position.x + (forward.x + right.x) * this.panelOffset.x,
+                    camera.position.y + this.panelOffset.y,
+                    camera.position.z + (forward.z + right.z) * this.panelOffset.z
                 );
                 
                 // Update panel position with lerp for smoothness
@@ -705,9 +742,9 @@ class XRScene {
                 // If panel is behind camera, reposition it in front
                 if (dot > 0) {
                     const newPosition = new BABYLON.Vector3(
-                        camera.position.x + forward.x * 2,
-                        camera.position.y - 0.7,
-                        camera.position.z + forward.z * 2
+                        camera.position.x + forward.x * this.panelOffset.x,
+                        camera.position.y + this.panelOffset.y,
+                        camera.position.z + forward.z * this.panelOffset.z
                     );
                     panel.position = newPosition;
                 }
