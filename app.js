@@ -417,38 +417,24 @@ class XRScene {
                                 const followDistance = 5;
                                 const followHeight = 2;
                                 let targetPosition;
-                                let lookAtTarget;
 
                                 // Only two modes now: Stationary and Follow
                                 switch (this.cameraMode) {
                                     case 0: // Stationary
-                                        // Position at start of track
                                         targetPosition = new BABYLON.Vector3(
                                             0,
                                             this.trackElevation + followHeight,
                                             -this.trackLength/2 + 4
                                         );
-                                        // Look at middle of track
-                                        lookAtTarget = new BABYLON.Vector3(
-                                            0,
-                                            this.trackElevation + 2.0,
-                                            this.trackLength/2
-                                        );
                                         break;
 
                                     case 1: // Follow
-                                    default: // Default to follow mode
-                                        // Position behind drone
+                                    default:
+                                        // Position behind drone but maintain camera's original rotation
                                         targetPosition = new BABYLON.Vector3(
                                             this.drone.position.x,
                                             this.drone.position.y + followHeight,
                                             this.drone.position.z - followDistance
-                                        );
-                                        // Look at drone
-                                        lookAtTarget = new BABYLON.Vector3(
-                                            this.drone.position.x,
-                                            this.drone.position.y,
-                                            this.drone.position.z
                                         );
                                         break;
                                 }
@@ -457,31 +443,10 @@ class XRScene {
                                 xrHelper.baseExperience.camera.position = BABYLON.Vector3.Lerp(
                                     xrHelper.baseExperience.camera.position,
                                     targetPosition,
-                                    0.05  // Reduced from 0.1 for smoother transition
+                                    0.05
                                 );
 
-                                // Create look-at matrix
-                                const lookAt = BABYLON.Matrix.LookAtLH(
-                                    xrHelper.baseExperience.camera.position,
-                                    lookAtTarget,
-                                    BABYLON.Vector3.Up()
-                                );
-
-                                // Convert to quaternion and apply rotation with smooth interpolation
-                                const targetRotation = BABYLON.Quaternion.FromRotationMatrix(lookAt);
-                                
-                                // Initialize rotationQuaternion if not set
-                                if (!xrHelper.baseExperience.camera.rotationQuaternion) {
-                                    xrHelper.baseExperience.camera.rotationQuaternion = targetRotation;
-                                } else {
-                                    // Smooth rotation interpolation
-                                    BABYLON.Quaternion.SlerpToRef(
-                                        xrHelper.baseExperience.camera.rotationQuaternion,
-                                        targetRotation,
-                                        0.05,
-                                        xrHelper.baseExperience.camera.rotationQuaternion
-                                    );
-                                }
+                                // Remove all the look-at and rotation code to allow free head movement
                             }
                         });
                     }
