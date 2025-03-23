@@ -477,7 +477,7 @@ class XRScene {
         this.panelOffset = {
             x: 1.90,
             y: -0.80,
-            z: 1.00
+            z: 1.20
         };
 
         // Add keyboard controls for panel position
