@@ -475,8 +475,8 @@ class XRScene {
     createVRUI(xrHelper) {
         // Add panel position offset that we can adjust
         this.panelOffset = {
-            x: 1.90,
-            y: -0.80,
+            x: 0.80,
+            y: -0.90,
             z: 1.20
         };
 
@@ -646,18 +646,11 @@ class XRScene {
             if (xrHelper.baseExperience && xrHelper.baseExperience.camera) {
                 const camera = xrHelper.baseExperience.camera;
                 
-                // Calculate position with fixed offset from camera
-                const targetPosition = new BABYLON.Vector3(
+                // Set panel position directly with fixed offset from camera
+                panel.position = new BABYLON.Vector3(
                     camera.position.x + this.panelOffset.x,
                     camera.position.y + this.panelOffset.y,
                     camera.position.z + this.panelOffset.z
-                );
-                
-                // Update panel position with lerp for smoothness
-                panel.position = BABYLON.Vector3.Lerp(
-                    panel.position || targetPosition.clone(),
-                    targetPosition,
-                    0.3
                 );
             }
         });
