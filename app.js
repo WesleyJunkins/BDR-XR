@@ -646,15 +646,19 @@ class XRScene {
             if (xrHelper.baseExperience && xrHelper.baseExperience.camera) {
                 const camera = xrHelper.baseExperience.camera;
                 
-                // Use a fixed forward direction (always looking down the track)
-                const fixedForward = new BABYLON.Vector3(0, 0, 1);
-                const fixedRight = new BABYLON.Vector3(1, 0, 0);
+                // Get the XR reference space forward direction (ignoring head rotation)
+                const xrReferenceSpace = xrHelper.baseExperience.camera.rightHandedSystem ? 
+                    new BABYLON.Vector3(0, 0, 1) : 
+                    new BABYLON.Vector3(0, 0, -1);
+                    
+                // Get fixed right vector
+                const fixedRight = BABYLON.Vector3.Cross(xrReferenceSpace, BABYLON.Vector3.Up()).normalize();
                 
-                // Calculate position relative to camera's position but using fixed orientation
+                // Calculate position relative to camera's position but using fixed forward direction
                 const targetPosition = new BABYLON.Vector3(
-                    camera.position.x + (fixedRight.x * this.panelOffset.x),
+                    camera.position.x + (xrReferenceSpace.x + fixedRight.x) * this.panelOffset.x,
                     camera.position.y + this.panelOffset.y,
-                    camera.position.z + (fixedForward.z * this.panelOffset.z)
+                    camera.position.z + (xrReferenceSpace.z + fixedRight.z) * this.panelOffset.z
                 );
                 
                 // Update panel position with lerp for smoothness
@@ -664,20 +668,19 @@ class XRScene {
                     0.3
                 );
                 
-                // Use fixed rotation for panel
-                const rotation = BABYLON.Quaternion.FromEulerAngles(
-                    Math.PI / 3,  // Tilt up by 60 degrees
-                    0,            // No yaw rotation
-                    0             // No roll rotation
+                // Set fixed rotation for the panel
+                const fixedRotation = BABYLON.Quaternion.FromEulerAngles(
+                    Math.PI / 3, // Tilt up by 60 degrees
+                    0,          // No yaw
+                    0           // No roll
                 );
                 
-                // Apply rotation
                 if (!panel.rotationQuaternion) {
-                    panel.rotationQuaternion = rotation;
+                    panel.rotationQuaternion = fixedRotation;
                 } else {
                     BABYLON.Quaternion.SlerpToRef(
                         panel.rotationQuaternion,
-                        rotation,
+                        fixedRotation,
                         0.3,
                         panel.rotationQuaternion
                     );
