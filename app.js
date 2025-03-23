@@ -658,7 +658,7 @@ class XRScene {
                 // Calculate position relative to camera's current orientation
                 // This ensures the panel stays in front regardless of camera rotation
                 const targetPosition = new BABYLON.Vector3(
-                    camera.position.x + (forward.x + right.x) * 1.7,
+                    camera.position.x + (forward.x + right.x) * 5.7,
                     camera.position.y - 0.5,  // Keep panel below eye level
                     camera.position.z + (forward.z + right.z) * 1.5
                 );
