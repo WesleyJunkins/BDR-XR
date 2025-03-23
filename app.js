@@ -416,11 +416,10 @@ class XRScene {
                             if (xrHelper.baseExperience.state === BABYLON.WebXRState.IN_XR) {
                                 const followDistance = 5;
                                 const followHeight = 2;
-                                const sideViewDistance = 8;
                                 let targetPosition;
                                 let lookAtTarget;
 
-                                // Different camera positions based on mode
+                                // Only two modes now: Stationary and Follow
                                 switch (this.cameraMode) {
                                     case 0: // Stationary
                                         // Position at start of track
@@ -438,26 +437,12 @@ class XRScene {
                                         break;
 
                                     case 1: // Follow
+                                    default: // Default to follow mode
                                         // Position behind drone
                                         targetPosition = new BABYLON.Vector3(
                                             this.drone.position.x,
                                             this.drone.position.y + followHeight,
                                             this.drone.position.z - followDistance
-                                        );
-                                        // Look at drone
-                                        lookAtTarget = new BABYLON.Vector3(
-                                            this.drone.position.x,
-                                            this.drone.position.y,
-                                            this.drone.position.z
-                                        );
-                                        break;
-
-                                    case 2: // Side view
-                                        // Position to the side of drone
-                                        targetPosition = new BABYLON.Vector3(
-                                            this.drone.position.x - sideViewDistance,
-                                            this.drone.position.y + followHeight,
-                                            this.drone.position.z
                                         );
                                         // Look at drone
                                         lookAtTarget = new BABYLON.Vector3(
@@ -590,13 +575,20 @@ class XRScene {
 
         // Add click handlers
         viewButton.onPointerUpObservable.add(() => {
-            this.cameraMode = (this.cameraMode + 1) % 3;
-            if (this.cameraMode === 0) {
-                viewButton.text = "View: Stationary";
-            } else if (this.cameraMode === 1) {
-                viewButton.text = "View: Follow";
+            if (xrHelper.baseExperience.state === BABYLON.WebXRState.IN_XR) {
+                // In XR mode, only toggle between stationary and follow
+                this.cameraMode = (this.cameraMode + 1) % 2; // Toggle between 0 and 1
+                viewButton.text = this.cameraMode === 0 ? "View: Stationary" : "View: Follow";
             } else {
-                viewButton.text = "View: Side";
+                // Regular non-XR mode keeps all three views
+                this.cameraMode = (this.cameraMode + 1) % 3;
+                if (this.cameraMode === 0) {
+                    viewButton.text = "View: Stationary";
+                } else if (this.cameraMode === 1) {
+                    viewButton.text = "View: Follow";
+                } else {
+                    viewButton.text = "View: Side";
+                }
             }
         });
 
