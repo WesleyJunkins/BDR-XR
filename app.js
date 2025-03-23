@@ -390,24 +390,80 @@ class XRScene {
             // Create 3D UI for VR
             this.createVRUI(xrHelper);
 
-            // Handle initial VR camera position
+            // Handle initial VR camera position and follow behavior
             xrHelper.baseExperience.onStateChangedObservable.add((state) => {
                 if (state === BABYLON.WebXRState.IN_XR) {
-                    // Set initial VR camera position
-                    xrHelper.baseExperience.camera.position = new BABYLON.Vector3(
-                        0,
-                        this.trackElevation + 2.2,
-                        -this.trackLength/2 + 4
-                    );
+                    // Store original camera mode to restore when exiting XR
+                    this.previousCameraMode = this.cameraMode;
                     
-                    // Set forward direction
-                    const forward = new BABYLON.Vector3(0, 0, 1);
-                    xrHelper.baseExperience.camera.rotationQuaternion = BABYLON.Quaternion.FromEulerAngles(0, 0, 0);
+                    // Force follow mode in XR
+                    this.cameraMode = 1; // Follow mode
+                    
+                    // Initial XR camera position behind drone
+                    const followDistance = 5;
+                    const followHeight = 2;
+                    
+                    // Position the XR camera behind the drone
+                    xrHelper.baseExperience.camera.position = new BABYLON.Vector3(
+                        this.drone.position.x,
+                        this.drone.position.y + followHeight,
+                        this.drone.position.z - followDistance
+                    );
 
-                    // Set up XR controller input handling once XR session is active
-                    this.setupXRControllers(xrHelper);
+                    // Add XR camera follow behavior
+                    if (!this.xrCameraFollow) {
+                        this.xrCameraFollow = this.scene.onBeforeRenderObservable.add(() => {
+                            if (xrHelper.baseExperience.state === BABYLON.WebXRState.IN_XR) {
+                                // Calculate target position behind drone
+                                const targetPosition = new BABYLON.Vector3(
+                                    this.drone.position.x,
+                                    this.drone.position.y + followHeight,
+                                    this.drone.position.z - followDistance
+                                );
+
+                                // Smoothly move XR camera to follow position
+                                xrHelper.baseExperience.camera.position = BABYLON.Vector3.Lerp(
+                                    xrHelper.baseExperience.camera.position,
+                                    targetPosition,
+                                    0.1
+                                );
+
+                                // Make camera look at drone
+                                const lookAtTarget = new BABYLON.Vector3(
+                                    this.drone.position.x,
+                                    this.drone.position.y,
+                                    this.drone.position.z
+                                );
+
+                                // Create look-at matrix
+                                const lookAt = BABYLON.Matrix.LookAtLH(
+                                    xrHelper.baseExperience.camera.position,
+                                    lookAtTarget,
+                                    BABYLON.Vector3.Up()
+                                );
+
+                                // Convert to quaternion and apply rotation
+                                const rotationQuaternion = BABYLON.Quaternion.FromRotationMatrix(lookAt);
+                                xrHelper.baseExperience.camera.rotationQuaternion = rotationQuaternion;
+                            }
+                        });
+                    }
+                } else if (state === BABYLON.WebXRState.NOT_IN_XR) {
+                    // Restore original camera mode when exiting XR
+                    if (this.previousCameraMode !== undefined) {
+                        this.cameraMode = this.previousCameraMode;
+                    }
+
+                    // Remove XR camera follow behavior
+                    if (this.xrCameraFollow) {
+                        this.scene.onBeforeRenderObservable.remove(this.xrCameraFollow);
+                        this.xrCameraFollow = null;
+                    }
                 }
             });
+
+            // Set up XR controller input handling
+            this.setupXRControllers(xrHelper);
 
         } catch (error) {
             console.log("XR not available:", error);
