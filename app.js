@@ -651,15 +651,17 @@ class XRScene {
             if (xrHelper.baseExperience && xrHelper.baseExperience.camera) {
                 const camera = xrHelper.baseExperience.camera;
                 
-                // Get camera's forward direction
+                // Get camera's forward direction and right vector
                 const forward = camera.getForwardRay().direction;
+                const right = BABYLON.Vector3.Cross(forward, BABYLON.Vector3.Up()).normalize();
                 
-                // Calculate position below and in front of the user
+                // Calculate position relative to camera's current orientation
+                // This ensures the panel stays in front regardless of camera rotation
                 const targetPosition = new BABYLON.Vector3(
-                    camera.position.x + 1.5,
-                    camera.position.y - 0.7,
-                    camera.position.z + 1.0
-                ).add(forward.scale(0.5));
+                    camera.position.x + (forward.x + right.x) * 1.5,
+                    camera.position.y - 0.7,  // Keep panel below eye level
+                    camera.position.z + (forward.z + right.z) * 1.5
+                );
                 
                 // Update panel position with lerp for smoothness
                 panel.position = BABYLON.Vector3.Lerp(
@@ -668,21 +670,47 @@ class XRScene {
                     0.3
                 );
                 
-                // Make panel face the user
-                const rotationMatrix = BABYLON.Matrix.LookAtLH(
+                // Always make panel face the camera's position
+                const lookAt = BABYLON.Matrix.LookAtLH(
                     panel.position,
                     camera.position,
                     BABYLON.Vector3.Up()
                 );
                 
-                // Apply rotation with tilt
-                const rotation = BABYLON.Quaternion.FromRotationMatrix(rotationMatrix);
+                // Convert to quaternion
+                const rotation = BABYLON.Quaternion.FromRotationMatrix(lookAt);
+                
+                // Apply tilt
                 rotation.multiplyInPlace(BABYLON.Quaternion.RotationAxis(
                     BABYLON.Vector3.Right(),
                     Math.PI / 3
                 ));
                 
-                panel.rotationQuaternion = rotation;
+                // Smoothly interpolate rotation
+                if (!panel.rotationQuaternion) {
+                    panel.rotationQuaternion = rotation;
+                } else {
+                    BABYLON.Quaternion.SlerpToRef(
+                        panel.rotationQuaternion,
+                        rotation,
+                        0.3,
+                        panel.rotationQuaternion
+                    );
+                }
+
+                // Ensure panel is always visible by checking if it's in front of the camera
+                const toCameraVector = camera.position.subtract(panel.position);
+                const dot = BABYLON.Vector3.Dot(forward, toCameraVector);
+                
+                // If panel is behind camera, reposition it in front
+                if (dot > 0) {
+                    const newPosition = new BABYLON.Vector3(
+                        camera.position.x + forward.x * 2,
+                        camera.position.y - 0.7,
+                        camera.position.z + forward.z * 2
+                    );
+                    panel.position = newPosition;
+                }
             }
         });
     }
