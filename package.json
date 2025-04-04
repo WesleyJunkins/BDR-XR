@@ -1,0 +1,12 @@
+{
+  "name": "eeg-mqtt-reader",
+  "version": "1.0.0",
+  "description": "MQTT client for reading EEG power values",
+  "main": "mqtt_client.js",
+  "scripts": {
+    "start": "node mqtt_client.js"
+  },
+  "dependencies": {
+    "mqtt": "^4.3.7"
+  }
+} 

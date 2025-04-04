@@ -19,6 +19,76 @@ class XRScene {
 
         // Initialize XR support
         this.initializeXR();
+        
+        // Initialize MQTT client
+        this.initializeMQTT();
+    }
+
+    // Initialize MQTT client
+    initializeMQTT() {
+        // MQTT Broker configuration
+        const brokerConfig = {
+            protocol: 'wss',
+            host: '21c4029e653247699764b7b976972f4f.s1.eu.hivemq.cloud',
+            port: 8884,
+            username: 'bdrXR1crimson',
+            password: 'bdrXR1crimson',
+            clientId: 'eeg_reader_' + Math.random().toString(16).substr(2, 8)
+        };
+
+        // Topic to subscribe to
+        const topic = 'bdrxr/connectorToWeb';
+
+        // Create MQTT client
+        this.mqttClient = mqtt.connect(brokerConfig);
+        
+        // Store the latest power value
+        this.latestPowerValue = "0.000";
+
+        // Handle connection
+        this.mqttClient.on('connect', () => {
+            console.log('Connected to MQTT broker');
+            this.mqttClient.subscribe(topic, (err) => {
+                if (!err) {
+                    console.log(`Subscribed to topic: ${topic}`);
+                }
+            });
+        });
+
+        // Handle incoming messages
+        this.mqttClient.on('message', (topic, message) => {
+            try {
+                const data = JSON.parse(message.toString());
+                
+                // Extract power value from the processed data
+                if (data.processedData && data.processedData.powerValue) {
+                    this.latestPowerValue = data.processedData.powerValue;
+                    console.log(`Power Value: ${this.latestPowerValue}%`);
+                    
+                    // Update the nudge button text if it exists
+                    if (this.nudgeButton) {
+                        this.nudgeButton.text = `Power: ${this.latestPowerValue}%`;
+                    }
+                }
+            } catch (error) {
+                console.error('Error parsing message:', error);
+            }
+        });
+
+        // Handle errors
+        this.mqttClient.on('error', (error) => {
+            console.error('MQTT Error:', error);
+        });
+
+        // Handle connection close
+        this.mqttClient.on('close', () => {
+            console.log('Disconnected from MQTT broker');
+        });
+
+        // Handle reconnection
+        this.mqttClient.on('reconnect', () => {
+            console.log('Reconnecting to MQTT broker...');
+        });
     }
 
     async createScene() {
@@ -536,7 +606,10 @@ class XRScene {
         // Add new Nudge Forward button
         const nudgeButton = new BABYLON.GUI.HolographicButton("nudgeButton");
         panel.addControl(nudgeButton);
-        nudgeButton.text = "Nudge Forward";
+        nudgeButton.text = "Power: 0.000%";
+        
+        // Store reference to the nudge button
+        this.nudgeButton = nudgeButton;
 
         // Add click handlers
         viewButton.onPointerUpObservable.add(() => {
