@@ -29,7 +29,7 @@ class XRScene {
         // MQTT Broker configuration
         const brokerConfig = {
             protocol: 'wss',
-            host: '21c4029e653247699764b7b976972f4f.s1.eu.hivemq.cloud',
+            hostname: '21c4029e653247699764b7b976972f4f.s1.eu.hivemq.cloud',
             port: 8884,
             username: 'bdrXR1crimson',
             password: 'bdrXR1crimson',
@@ -39,8 +39,15 @@ class XRScene {
         // Topic to subscribe to
         const topic = 'bdrxr/connectorToWeb';
 
-        // Create MQTT client
-        this.mqttClient = mqtt.connect(brokerConfig);
+        // Create MQTT client with full URL and proper configuration
+        const url = `${brokerConfig.protocol}://${brokerConfig.hostname}/mqtt`;  // Add /mqtt to the URL
+        this.mqttClient = mqtt.connect(url, {
+            username: brokerConfig.username,
+            password: brokerConfig.password,
+            clientId: brokerConfig.clientId,
+            port: brokerConfig.port,
+            protocol: brokerConfig.protocol
+        });
         
         // Store the latest power value
         this.latestPowerValue = "0.000";
@@ -51,6 +58,8 @@ class XRScene {
             this.mqttClient.subscribe(topic, (err) => {
                 if (!err) {
                     console.log(`Subscribed to topic: ${topic}`);
+                } else {
+                    console.error('Subscription error:', err);
                 }
             });
         });
