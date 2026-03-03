@@ -552,43 +552,12 @@ class XRScene {
     }
 
     createVRUI(xrHelper) {
-        // Add panel position offset that we can adjust
+        // Adjust panel position offset for better visibility
         this.panelOffset = {
-            x: 0.80,
-            y: -0.90,
-            z: 1.20
+            x: 0,      // Changed from 0.80 to 0
+            y: -0.5,   // Changed from -0.90 to -0.5
+            z: 1.0     // Changed from 1.20 to 1.0
         };
-
-        // Add keyboard controls for panel position
-        window.addEventListener("keydown", (e) => {
-            const adjustmentAmount = 0.1;
-            switch(e.key.toLowerCase()) {
-                case 'q':
-                    this.panelOffset.x += adjustmentAmount;
-                    console.log(`Panel X offset: ${this.panelOffset.x.toFixed(2)}`);
-                    break;
-                case 'a':
-                    this.panelOffset.x -= adjustmentAmount;
-                    console.log(`Panel X offset: ${this.panelOffset.x.toFixed(2)}`);
-                    break;
-                case 'w':
-                    this.panelOffset.y += adjustmentAmount;
-                    console.log(`Panel Y offset: ${this.panelOffset.y.toFixed(2)}`);
-                    break;
-                case 's':
-                    this.panelOffset.y -= adjustmentAmount;
-                    console.log(`Panel Y offset: ${this.panelOffset.y.toFixed(2)}`);
-                    break;
-                case 'e':
-                    this.panelOffset.z += adjustmentAmount;
-                    console.log(`Panel Z offset: ${this.panelOffset.z.toFixed(2)}`);
-                    break;
-                case 'd':
-                    this.panelOffset.z -= adjustmentAmount;
-                    console.log(`Panel Z offset: ${this.panelOffset.z.toFixed(2)}`);
-                    break;
-            }
-        });
 
         // Create a 3D UI panel that follows the user
         const manager = new BABYLON.GUI.GUI3DManager(this.scene);
@@ -596,8 +565,8 @@ class XRScene {
         manager.addControl(panel);
         panel.margin = 0.01;
 
-        // Initial scaling
-        panel.scaling = new BABYLON.Vector3(0.25, 0.25, 0.25);
+        // Increase panel scaling for better visibility
+        panel.scaling = new BABYLON.Vector3(0.3, 0.3, 0.3); // Changed from 0.25 to 0.3
 
         // Create VR buttons
         const viewButton = new BABYLON.GUI.HolographicButton("viewButton");
@@ -723,17 +692,25 @@ class XRScene {
             }
         });
 
-        // Update the panel follow behavior to use the offset values
+        // Update the panel follow behavior
         this.scene.registerBeforeRender(() => {
             if (xrHelper.baseExperience && xrHelper.baseExperience.camera) {
                 const camera = xrHelper.baseExperience.camera;
                 
-                // Set panel position directly with fixed offset from camera
+                // Calculate panel position relative to camera's forward direction
+                const forward = camera.getForwardRay().direction;
+                const right = BABYLON.Vector3.Cross(forward, BABYLON.Vector3.Up());
+                const up = BABYLON.Vector3.Cross(right, forward);
+                
+                // Position panel in front of the user, slightly below eye level
                 panel.position = new BABYLON.Vector3(
-                    camera.position.x + this.panelOffset.x,
+                    camera.position.x + (forward.x * this.panelOffset.z) + (right.x * this.panelOffset.x),
                     camera.position.y + this.panelOffset.y,
-                    camera.position.z + this.panelOffset.z
+                    camera.position.z + (forward.z * this.panelOffset.z) + (right.z * this.panelOffset.x)
                 );
+                
+                // Make panel face the user
+                panel.lookAt(camera.position);
             }
         });
     }
