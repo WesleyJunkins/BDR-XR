@@ -1,46 +1,56 @@
+/**
+ * XRScene: Main application class for the BDR-XR WebXR experience.
+ * Builds the 3D world (track, water, sky), drone, 2D/VR GUI, MQTT subscription for EEG power,
+ * and handles keyboard and XR controller input plus camera modes.
+ */
 class XRScene {
     constructor() {
-        // Get the canvas element
+        // Resolve the canvas element that Babylon.js will use for WebGL rendering
         this.canvas = document.getElementById("renderCanvas");
+        // Create the Babylon engine (WebGL 2/1, antialias enabled) bound to the canvas
         this.engine = new BABYLON.Engine(this.canvas, true);
 
-        // Create our scene
+        // Build the scene: camera, lights, drone, environment (sky, ground, track, water), and 2D GUI
         this.createScene();
 
-        // Start render loop
+        // Run the render loop: each frame calls scene.render() to draw the 3D scene
         this.engine.runRenderLoop(() => {
             this.scene.render();
         });
 
-        // Handle window resize
+        // When the window is resized, tell the engine to update the canvas size and aspect ratio
         window.addEventListener("resize", () => {
             this.engine.resize();
         });
 
-        // Initialize XR support
+        // Set up WebXR (VR) support: default XR experience, VR UI panel, and controller input
         this.initializeXR();
-        
-        // Initialize MQTT client
+        // Connect to MQTT broker and subscribe for EEG power values; updates nudge button label
         this.initializeMQTT();
     }
 
-    // Initialize MQTT client
+    /**
+     * Connects to the MQTT broker (HiveMQ Cloud) and subscribes to the connector topic.
+     * Incoming messages are expected to be JSON with processedData.powerValue; that value
+     * is stored in this.latestPowerValue and reflected on the VR nudge button text.
+     */
     initializeMQTT() {
-        // MQTT Broker configuration
+        // Broker connection settings for browser (WSS); must match connector/backend broker
         const brokerConfig = {
             protocol: 'wss',
             hostname: '21c4029e653247699764b7b976972f4f.s1.eu.hivemq.cloud',
             port: 8884,
             username: 'bdrXR1crimson',
             password: 'bdrXR1crimson',
+            // Unique client ID per tab/session to avoid broker rejecting duplicate IDs
             clientId: 'eeg_reader_' + Math.random().toString(16).substr(2, 8)
         };
 
-        // Topic to subscribe to
+        // Topic on which the external EEG connector publishes processed data (e.g. power value)
         const topic = 'bdrxr/connectorToWeb';
 
-        // Create MQTT client with full URL and proper configuration
-        const url = `${brokerConfig.protocol}://${brokerConfig.hostname}/mqtt`;  // Add /mqtt to the URL
+        // Build WebSocket URL; HiveMQ Cloud expects path /mqtt for MQTT over WSS
+        const url = `${brokerConfig.protocol}://${brokerConfig.hostname}/mqtt`;
         this.mqttClient = mqtt.connect(url, {
             username: brokerConfig.username,
             password: brokerConfig.password,
@@ -48,11 +58,10 @@ class XRScene {
             port: brokerConfig.port,
             protocol: brokerConfig.protocol
         });
-        
-        // Store the latest power value
+        // Default power value shown until first MQTT message arrives
         this.latestPowerValue = "0.000";
 
-        // Handle connection
+        // When connected to the broker, subscribe to the connector topic
         this.mqttClient.on('connect', () => {
             console.log('Connected to MQTT broker');
             this.mqttClient.subscribe(topic, (err) => {
@@ -64,17 +73,13 @@ class XRScene {
             });
         });
 
-        // Handle incoming messages
+        // For each message on the topic: parse JSON and update latestPowerValue and VR nudge button
         this.mqttClient.on('message', (topic, message) => {
             try {
                 const data = JSON.parse(message.toString());
-                
-                // Extract power value from the processed data
                 if (data.processedData && data.processedData.powerValue) {
                     this.latestPowerValue = data.processedData.powerValue;
                     console.log(`Power Value: ${this.latestPowerValue}%`);
-                    
-                    // Update the nudge button text if it exists
                     if (this.nudgeButton) {
                         this.nudgeButton.text = `Power: ${this.latestPowerValue}%`;
                     }
@@ -84,58 +89,53 @@ class XRScene {
             }
         });
 
-        // Handle errors
         this.mqttClient.on('error', (error) => {
             console.error('MQTT Error:', error);
         });
-
-        // Handle connection close
         this.mqttClient.on('close', () => {
             console.log('Disconnected from MQTT broker');
         });
-
-        // Handle reconnection
         this.mqttClient.on('reconnect', () => {
             console.log('Reconnecting to MQTT broker...');
         });
     }
 
+    /**
+     * Creates the main Babylon scene: camera, lights, drone, skybox, ground, track, water, finish line.
+     * Also sets initial camera position and registers keyboard controls via setupDroneControls.
+     */
     async createScene() {
-        // Create a new scene
         this.scene = new BABYLON.Scene(this.engine);
 
-        // Define common dimensions and levels first as class properties
+        // World dimensions used by track, boundaries, camera, and drone placement
         this.trackWidth = 10;
-        this.trackLength = 100;  // Increased from 30 to 100
+        this.trackLength = 100;
         this.trackHeight = 0.3;
         this.waterLevel = -1;
         this.trackElevation = 10;
 
-        // Add a camera
+        // FreeCamera for desktop: orbit/look with mouse; position and target set below
         this.camera = new BABYLON.FreeCamera("camera", new BABYLON.Vector3(0, 5, -10), this.scene);
         this.camera.setTarget(BABYLON.Vector3.Zero());
         this.camera.attachControl(this.canvas, true);
+        // Disable keyboard movement so only drone moves via arrow keys
         this.camera.inputs.removeByType("FreeCameraKeyboardMoveInput");
 
-        // Add lights
+        // Single hemispheric light for basic shading (direction from above)
         const light = new BABYLON.HemisphericLight("light", new BABYLON.Vector3(0, 1, 0), this.scene);
         light.intensity = 1.0;
 
-        // Create drone
         this.createDrone();
 
-        // Add camera modes
-        this.cameraMode = 0; // 0: stationary, 1: follow, 2: side view
+        // 0 = stationary, 1 = follow drone, 2 = side view; used by GUI and setupDroneControls
+        this.cameraMode = 0;
         this.originalCameraPosition = this.camera.position.clone();
         this.originalCameraTarget = new BABYLON.Vector3(0, this.trackElevation + 2.0, this.trackLength/2);
 
-        // Create GUI
         this.createGUI();
-
-        // Add keyboard controls for the drone
         this.setupDroneControls();
 
-        // Create skybox
+        // Large box with cubemap texture to simulate sky (no geometry culling on inside)
         const skybox = BABYLON.MeshBuilder.CreateBox("skyBox", { size: 1000.0 }, this.scene);
         const skyboxMaterial = new BABYLON.StandardMaterial("skyBox", this.scene);
         skyboxMaterial.backFaceCulling = false;
@@ -146,7 +146,7 @@ class XRScene {
         skyboxMaterial.disableLighting = true;
         skybox.material = skyboxMaterial;
 
-        // Create textured ground underneath water
+        // Ground plane below the water; used in reflections and as visual base
         const groundMaterial = new BABYLON.StandardMaterial("groundMaterial", this.scene);
         groundMaterial.diffuseTexture = new BABYLON.Texture("https://playground.babylonjs.com/textures/ground.jpg", this.scene);
         groundMaterial.diffuseTexture.uScale = 4;
@@ -157,10 +157,10 @@ class XRScene {
             height: 512,
             subdivisions: 32
         }, this.scene);
-        ground.position.y = this.waterLevel - 1; // Position it just below water level
+        ground.position.y = this.waterLevel - 1;
         ground.material = groundMaterial;
 
-        // Create floating platform (racetrack)
+        // Floating racetrack platform (box) at trackElevation; also used as XR floor mesh
         const track = BABYLON.MeshBuilder.CreateBox("track", {
             width: this.trackWidth,
             height: this.trackHeight,
@@ -168,45 +168,36 @@ class XRScene {
         }, this.scene);
         track.position.y = this.trackElevation;
 
-        // Create and configure track material with asphalt texture
         const trackMaterial = new BABYLON.StandardMaterial("trackMaterial", this.scene);
-
-        // Add floor texture
         trackMaterial.diffuseTexture = new BABYLON.Texture("assets/floor.png", this.scene);
-        trackMaterial.diffuseTexture.uScale = 10;  // Increased from 4 to 10 for width
-        trackMaterial.diffuseTexture.vScale = 100; // Increased from 40 to 100 for length
-
-        // Add bump texture for more realism
+        trackMaterial.diffuseTexture.uScale = 10;
+        trackMaterial.diffuseTexture.vScale = 100;
         trackMaterial.bumpTexture = new BABYLON.Texture("assets/floor_bump.PNG", this.scene);
-        trackMaterial.bumpTexture.uScale = 10;     // Match the diffuse texture scaling
-        trackMaterial.bumpTexture.vScale = 100;    // Match the diffuse texture scaling
-
-        // Adjust material properties
+        trackMaterial.bumpTexture.uScale = 10;
+        trackMaterial.bumpTexture.vScale = 100;
         trackMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
         trackMaterial.specularPower = 64;
         trackMaterial.useParallax = true;
         trackMaterial.useParallaxOcclusion = true;
         trackMaterial.parallaxScaleBias = 0.1;
-
         track.material = trackMaterial;
 
-        // Add racing lines - adjust their height to match track
+        // Two thin strips (left/right) on the track to suggest lane boundaries
         const lineWidth = 0.3;
         const leftLine = BABYLON.MeshBuilder.CreateGround("leftLine", {
             width: lineWidth,
             height: this.trackLength
         }, this.scene);
         leftLine.position.x = -this.trackWidth/4;
-        leftLine.position.y = this.trackElevation + this.trackHeight/2 + 0.01; // Adjusted height
+        leftLine.position.y = this.trackElevation + this.trackHeight/2 + 0.01;
 
         const rightLine = BABYLON.MeshBuilder.CreateGround("rightLine", {
             width: lineWidth,
             height: this.trackLength
         }, this.scene);
         rightLine.position.x = this.trackWidth/4;
-        rightLine.position.y = this.trackElevation + this.trackHeight/2 + 0.01; // Adjusted height
+        rightLine.position.y = this.trackElevation + this.trackHeight/2 + 0.01;
 
-        // Make the racing lines more visible
         const lineMaterial = new BABYLON.StandardMaterial("lineMaterial", this.scene);
         lineMaterial.diffuseColor = new BABYLON.Color3(1, 1, 1);
         lineMaterial.emissiveColor = new BABYLON.Color3(0.5, 0.5, 0.5); // Add some glow
@@ -214,38 +205,32 @@ class XRScene {
         leftLine.material = lineMaterial;
         rightLine.material = lineMaterial;
 
-        // Create water
+        // Water plane at waterLevel; uses WaterMaterial for animated waves and reflections
         const waterMesh = BABYLON.MeshBuilder.CreateGround("waterMesh", {
             width: 512,
             height: 512,
-            subdivisions: 64  // Increased for finer wave detail
+            subdivisions: 64
         }, this.scene);
         waterMesh.position.y = this.waterLevel;
 
         const water = new BABYLON.WaterMaterial("water", this.scene);
-        
-        // Enhanced water properties - more dynamic waves and faster flow
-        water.windForce = -15;           // Increased wind force for more movement
-        water.waveHeight = 0.5;          // Reduced for finer waves
+        water.windForce = -15;
+        water.waveHeight = 0.5;
         water.windDirection = new BABYLON.Vector2(1, 1);
         water.waterColor = new BABYLON.Color3(0, 0.3, 0.5);
-        water.colorBlendFactor = 0.1;    // Reduced for more visible waves
-        water.waveLength = 0.005;         // Reduced for finer ripples
-        water.waveSpeed = 40.0;          // Doubled for faster movement
-        water.bumpHeight = 0.001;          // Adjusted for better wave definition
-        water.waveCount = 80;            // Doubled for more frequent waves
-        
-        // Add ground to water reflections
+        water.colorBlendFactor = 0.1;
+        water.waveLength = 0.005;
+        water.waveSpeed = 40.0;
+        water.bumpHeight = 0.001;
+        water.waveCount = 80;
         water.addToRenderList(skybox);
         water.addToRenderList(track);
         water.addToRenderList(leftLine);
         water.addToRenderList(rightLine);
-        water.addToRenderList(ground); // Add ground to water reflections
-
-        // Assign the water material
+        water.addToRenderList(ground);
         waterMesh.material = water;
 
-        // Adjust camera position to see more of the longer track
+        // Initial camera: centered on track, looking down the length; height above track
         const cameraHeight = 2.2;
         this.camera.position = new BABYLON.Vector3(
             0,                              // Centered on track
@@ -258,11 +243,10 @@ class XRScene {
             this.trackLength/2           // Looking toward the end of the longer track
         ));
 
-        // Optional: Restrict camera movement for a more controlled experience
-        this.camera.upperBetaLimit = Math.PI / 2;    // Limit looking up
-        this.camera.lowerBetaLimit = -Math.PI / 2;   // Limit looking down
+        this.camera.upperBetaLimit = Math.PI / 2;
+        this.camera.lowerBetaLimit = -Math.PI / 2;
 
-        // Add finish line near the end of track
+        // Finish line mesh: goal position; drone movement is clamped to this Z
         const finishLine = BABYLON.MeshBuilder.CreateGround("finishLine", {
             width: this.trackWidth,
             height: 0.5
@@ -271,9 +255,7 @@ class XRScene {
         // Position it near the end of the track
         finishLine.position.x = 0;
         finishLine.position.y = this.trackElevation + this.trackHeight/2 + 0.01;
-        finishLine.position.z = this.trackLength/2 - 2; // 2 units from the end
-        
-        // Create red material for finish line
+        finishLine.position.z = this.trackLength/2 - 2;
         const finishLineMaterial = new BABYLON.StandardMaterial("finishLineMaterial", this.scene);
         finishLineMaterial.diffuseColor = new BABYLON.Color3(1, 0, 0);
         finishLineMaterial.emissiveColor = new BABYLON.Color3(0.5, 0, 0); // Add glow effect
@@ -281,11 +263,13 @@ class XRScene {
         finishLine.material = finishLineMaterial;
     }
 
+    /**
+     * Builds the drone: a TransformNode with body box, four arms, and four propeller cylinders.
+     * All parts are parented to droneContainer so moving the container moves the whole drone.
+     * Initial position is near the start of the track; initialDronePosition used for reset.
+     */
     createDrone() {
-        // Create a parent transform node for the drone
         this.droneContainer = new BABYLON.TransformNode("droneContainer", this.scene);
-        
-        // Create the main body and parent it to the container
         const body = BABYLON.MeshBuilder.CreateBox("droneBody", {
             width: 0.8,
             height: 0.2,
@@ -298,7 +282,6 @@ class XRScene {
         bodyMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.2, 0.2);
         body.material = bodyMaterial;
 
-        // Create four arms
         const armLength = 0.6;
         const armWidth = 0.1;
         const armHeight = 0.05;
@@ -318,8 +301,6 @@ class XRScene {
             }, this.scene);
             arm.parent = this.droneContainer;
             arm.position = new BABYLON.Vector3(pos.x, 0, pos.z);
-
-            // Create propeller
             const propeller = BABYLON.MeshBuilder.CreateCylinder(`propeller${index}`, {
                 height: 0.05,
                 diameter: 0.3
@@ -333,7 +314,6 @@ class XRScene {
             propeller.material = propMaterial;
         });
 
-        // Position the drone container on the ground at start
         const cameraHeight = 2.2;
         this.droneContainer.position = new BABYLON.Vector3(
             0,                                  // Centered on x-axis
@@ -345,16 +325,15 @@ class XRScene {
         this.initialDronePosition = this.droneContainer.position.clone();
         this.flyingHeight = this.trackElevation + cameraHeight;
         this.isFlying = false;
-
-        // Store drone reference for later use
         this.drone = this.droneContainer;
     }
 
+    /**
+     * Creates the 2D overlay GUI (desktop): fullscreen texture with a horizontal strip of buttons
+     * at the bottom-left. Buttons: Change View (cycle camera mode), Lift-Off/Land, Reset Position.
+     */
     createGUI() {
-        // Create AdvancedDynamicTexture for GUI
         const advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
-
-        // Create a horizontal stack panel for buttons
         const stackPanel = new BABYLON.GUI.StackPanel();
         stackPanel.isVertical = false;
         stackPanel.height = "40px";
@@ -364,7 +343,6 @@ class XRScene {
         stackPanel.top = "-20px";
         advancedTexture.addControl(stackPanel);
 
-        // Create View Button
         const viewButton = BABYLON.GUI.Button.CreateSimpleButton("viewButton", "Change View (Stationary)");
         viewButton.width = "180px";
         viewButton.height = "40px";
@@ -394,15 +372,11 @@ class XRScene {
         resetButton.background = "rgba(51, 51, 51, 0.8)";
         resetButton.paddingLeft = "10px";
         stackPanel.addControl(resetButton);
-
-        // Store button reference
         this.flightButton = flightButton;
 
-        // Add click handlers
         viewButton.onPointerClickObservable.add(() => {
             this.cameraMode = (this.cameraMode + 1) % 3;
-            
-            if (this.cameraMode === 0) { // Stationary
+            if (this.cameraMode === 0) {
                 const cameraHeight = 2.2;
                 this.camera.position = new BABYLON.Vector3(
                     0,
@@ -427,7 +401,6 @@ class XRScene {
                 }
             }
         });
-
         flightButton.onPointerClickObservable.add(() => {
             if (!this.isFlying) {
                 this.isFlying = true;
@@ -437,12 +410,10 @@ class XRScene {
                 flightButton.textBlock.text = "Lift-Off";
             }
         });
-
         resetButton.onPointerClickObservable.add(() => {
             this.drone.position = this.initialDronePosition.clone();
             this.isFlying = false;
             flightButton.textBlock.text = "Lift-Off";
-            
             if (this.cameraMode === 0) {
                 const cameraHeight = 2.2;
                 this.camera.position = new BABYLON.Vector3(
@@ -459,57 +430,45 @@ class XRScene {
         });
     }
 
+    /**
+     * Sets up WebXR: default XR experience with track as floor, VR 3D UI panel, and per-frame
+     * camera follow. On enter VR, camera mode is forced to follow and a before-render observer
+     * moves the XR camera (or keeps it stationary when mode 0). On exit, camera mode is restored.
+     */
     async initializeXR() {
         try {
-            // Check if XR is available
             const xrHelper = await this.scene.createDefaultXRExperienceAsync({
                 floorMeshes: [this.scene.getMeshByName("track")]
             });
-
-            // Create 3D UI for VR
             this.createVRUI(xrHelper);
 
-            // Handle initial VR camera position and follow behavior
             xrHelper.baseExperience.onStateChangedObservable.add((state) => {
                 if (state === BABYLON.WebXRState.IN_XR) {
-                    // Store original camera mode to restore when exiting XR
                     this.previousCameraMode = this.cameraMode;
-                    
-                    // Force follow mode in XR
-                    this.cameraMode = 1; // Follow mode
-                    
-                    // Initial XR camera position behind drone
+                    this.cameraMode = 1;
                     const followDistance = 5;
                     const followHeight = 2;
-                    
-                    // Position the XR camera behind the drone
                     xrHelper.baseExperience.camera.position = new BABYLON.Vector3(
                         this.drone.position.x,
                         this.drone.position.y + followHeight,
                         this.drone.position.z - followDistance
                     );
-
-                    // Add XR camera follow behavior
                     if (!this.xrCameraFollow) {
                         this.xrCameraFollow = this.scene.onBeforeRenderObservable.add(() => {
                             if (xrHelper.baseExperience.state === BABYLON.WebXRState.IN_XR) {
                                 const followDistance = 5;
                                 const followHeight = 2;
                                 let targetPosition;
-
-                                // Only two modes now: Stationary and Follow
                                 switch (this.cameraMode) {
-                                    case 0: // Stationary
+                                    case 0:
                                         targetPosition = new BABYLON.Vector3(
                                             0,
                                             this.trackElevation + followHeight,
                                             -this.trackLength/2 + 4
                                         );
                                         break;
-
-                                    case 1: // Follow
+                                    case 1:
                                     default:
-                                        // Position behind drone but maintain camera's original rotation
                                         targetPosition = new BABYLON.Vector3(
                                             this.drone.position.x,
                                             this.drone.position.y + followHeight,
@@ -517,49 +476,38 @@ class XRScene {
                                         );
                                         break;
                                 }
-
-                                // Smoothly move XR camera to target position
                                 xrHelper.baseExperience.camera.position = BABYLON.Vector3.Lerp(
                                     xrHelper.baseExperience.camera.position,
                                     targetPosition,
                                     0.05
                                 );
-
-                                // Remove all the look-at and rotation code to allow free head movement
                             }
                         });
                     }
                 } else if (state === BABYLON.WebXRState.NOT_IN_XR) {
-                    // Restore original camera mode when exiting XR
                     if (this.previousCameraMode !== undefined) {
                         this.cameraMode = this.previousCameraMode;
                     }
-
-                    // Remove XR camera follow behavior
                     if (this.xrCameraFollow) {
                         this.scene.onBeforeRenderObservable.remove(this.xrCameraFollow);
                         this.xrCameraFollow = null;
                     }
                 }
             });
-
-            // Set up XR controller input handling
             this.setupXRControllers(xrHelper);
-
         } catch (error) {
             console.log("XR not available:", error);
         }
     }
 
+    /**
+     * Creates the VR 3D UI: a plane panel with holographic buttons (View, Lift-Off, Reset, Nudge).
+     * Panel position is updated each frame to follow the XR camera with panelOffset. Q/A, W/S, E/D
+     * adjust panelOffset for layout tuning. Nudge button shows latest MQTT power and triggers a
+     * short forward burst (accel then decel) when pressed while flying.
+     */
     createVRUI(xrHelper) {
-        // Add panel position offset that we can adjust
-        this.panelOffset = {
-            x: 0.80,
-            y: -0.90,
-            z: 1.20
-        };
-
-        // Add keyboard controls for panel position
+        this.panelOffset = { x: 0.80, y: -0.90, z: 1.20 };
         window.addEventListener("keydown", (e) => {
             const adjustmentAmount = 0.1;
             switch(e.key.toLowerCase()) {
@@ -590,16 +538,12 @@ class XRScene {
             }
         });
 
-        // Create a 3D UI panel that follows the user
         const manager = new BABYLON.GUI.GUI3DManager(this.scene);
         const panel = new BABYLON.GUI.PlanePanel();
         manager.addControl(panel);
         panel.margin = 0.01;
-
-        // Initial scaling
         panel.scaling = new BABYLON.Vector3(0.25, 0.25, 0.25);
 
-        // Create VR buttons
         const viewButton = new BABYLON.GUI.HolographicButton("viewButton");
         panel.addControl(viewButton);
         viewButton.text = "Change View";
@@ -611,16 +555,11 @@ class XRScene {
         const resetButton = new BABYLON.GUI.HolographicButton("resetButton");
         panel.addControl(resetButton);
         resetButton.text = "Reset";
-
-        // Add new Nudge Forward button
         const nudgeButton = new BABYLON.GUI.HolographicButton("nudgeButton");
         panel.addControl(nudgeButton);
         nudgeButton.text = "Power: 0.000%";
-        
-        // Store reference to the nudge button
         this.nudgeButton = nudgeButton;
 
-        // Add click handlers
         viewButton.onPointerUpObservable.add(() => {
             if (xrHelper.baseExperience.state === BABYLON.WebXRState.IN_XR) {
                 // In XR mode, only toggle between stationary and follow
@@ -727,8 +666,6 @@ class XRScene {
         this.scene.registerBeforeRender(() => {
             if (xrHelper.baseExperience && xrHelper.baseExperience.camera) {
                 const camera = xrHelper.baseExperience.camera;
-                
-                // Set panel position directly with fixed offset from camera
                 panel.position = new BABYLON.Vector3(
                     camera.position.x + this.panelOffset.x,
                     camera.position.y + this.panelOffset.y,
@@ -738,78 +675,61 @@ class XRScene {
         });
     }
 
+    /**
+     * Binds XR controller thumbsticks to drone movement when flying: left stick = forward/back
+     * and strafe, right stick = up/down. Velocities are smoothed and clamped to track boundaries.
+     * Default Babylon controller movement/rotation is disabled so we drive the drone only.
+     */
     setupXRControllers(xrHelper) {
-        // Store velocities as class properties so they persist between frames
         this.xrVelocity = { x: 0, y: 0, z: 0 };
         const maxSpeed = 0.5;
         const maxTilt = 0.2;
         const finishLinePosition = this.trackLength/2 - 2;
         const startPosition = -this.trackLength/2;
-
-        // Store controller references
         this.leftController = null;
         this.rightController = null;
 
-        // Disable default controller behavior
         xrHelper.baseExperience.camera.checkCollisions = false;
         xrHelper.input.xrCamera.checkCollisions = false;
-        
-        // Disable default controller movement
         xrHelper.input.onControllerAddedObservable.add((controller) => {
-            // Disable default movement/rotation behavior
             controller.onMotionControllerInitObservable.add((motionController) => {
                 console.log(`XR Controller ${motionController.handedness} initialized`);
-                
-                // Store controller reference
                 if (motionController.handedness === 'left') {
                     this.leftController = controller;
                 } else if (motionController.handedness === 'right') {
                     this.rightController = controller;
                 }
-
-                // Disable default thumbstick behavior
                 const thumbstick = motionController.getComponent("thumbstick");
                 if (thumbstick) {
-                    thumbstick.onAxisValueChangedObservable.clear(); // Clear default behaviors
-                    controller.onAxisValueChangedObservable.clear(); // Clear controller level behaviors
+                    thumbstick.onAxisValueChangedObservable.clear();
+                    controller.onAxisValueChangedObservable.clear();
                 }
             });
         });
 
-        // Handle movement in the scene's beforeRender loop
         this.scene.onBeforeRenderObservable.add(() => {
             if (!this.isFlying || !this.drone) return;
-
             try {
-                // Handle left controller for forward/backward and left/right movement
                 if (this.leftController?.motionController) {
                     const leftStick = this.leftController.motionController.getComponent("thumbstick");
                     if (leftStick) {
-                        // Forward/Backward (Z-axis)
                         this.xrVelocity.z = BABYLON.Scalar.Lerp(
                             this.xrVelocity.z,
-                            -leftStick.axes.y * maxSpeed, // Forward/Backward
+                            -leftStick.axes.y * maxSpeed,
                             0.1
                         );
-
-                        // Left/Right (X-axis)
                         this.xrVelocity.x = BABYLON.Scalar.Lerp(
                             this.xrVelocity.x,
-                            leftStick.axes.x * maxSpeed, // Left/Right
+                            leftStick.axes.x * maxSpeed,
                             0.1
                         );
-
-                        // Update drone tilt
                         this.drone.rotation.x = maxTilt * (this.xrVelocity.z / maxSpeed);
                         this.drone.rotation.z = -maxTilt * (this.xrVelocity.x / maxSpeed);
                     }
                 }
-
-                // Handle right controller for up/down movement
                 if (this.rightController?.motionController) {
                     const rightStick = this.rightController.motionController.getComponent("thumbstick");
                     if (rightStick) {
-                        // Up/Down (Y-axis)
                         this.xrVelocity.y = BABYLON.Scalar.Lerp(
                             this.xrVelocity.y,
                             -rightStick.axes.y * maxSpeed * 0.5,
@@ -817,13 +737,9 @@ class XRScene {
                         );
                     }
                 }
-
-                // Apply movement
                 this.drone.position.x += this.xrVelocity.x;
                 this.drone.position.y += this.xrVelocity.y;
                 this.drone.position.z += this.xrVelocity.z;
-
-                // Apply boundaries
                 if (this.drone.position.z > finishLinePosition) {
                     this.drone.position.z = finishLinePosition;
                     this.xrVelocity.z = 0;
@@ -838,45 +754,38 @@ class XRScene {
                     this.drone.position.x = Math.sign(this.drone.position.x) * sideLimit;
                     this.xrVelocity.x = 0;
                 }
-
             } catch (error) {
                 console.warn("XR controller update error:", error);
             }
         });
     }
 
+    /**
+     * Registers the main per-frame logic: takeoff/landing animation, keyboard movement (arrows,
+     * PageUp/PageDown), track boundaries, camera follow (or sceneRoot in VR), propeller spin,
+     * and in VR parenting of meshes to sceneRoot so the world moves with follow camera.
+     */
     setupDroneControls() {
-        // Movement settings
         const maxSpeed = 0.5;
         const acceleration = 0.005;
         const deceleration = 0.050;
         const rotationSpeed = 0.05;
         const maxTilt = 0.2;
-        
-        // Add camera follow parameters
         const followDistance = 5;
         const followHeight = 2;
         const sideViewDistance = 8;
-        
-        // Add track boundary
         const finishLinePosition = this.trackLength/2 - 2;
         const startPosition = -this.trackLength/2;
-        
-        // Track key states
         const keysPressed = {};
         const velocity = { x: 0, y: 0, z: 0 };
-        
-        // Handle keydown
+
         window.addEventListener("keydown", (e) => {
             keysPressed[e.key] = true;
         });
-        
-        // Handle keyup
         window.addEventListener("keyup", (e) => {
             keysPressed[e.key] = false;
         });
 
-        // Enhanced vertical transition settings
         const maxTakeoffSpeed = 0.1;
         const minTakeoffSpeed = 0.01;  // Minimum speed for smooth final approach
         const takeoffAcceleration = 0.002;
@@ -884,18 +793,14 @@ class XRScene {
         let verticalTransitionVelocity = 0;
         const targetLandingHeight = this.trackElevation + this.trackHeight/2 + 0.2;
         const hoverHeight = this.flyingHeight;
-        
-        // Create a root node for the entire scene
         this.sceneRoot = new BABYLON.TransformNode("sceneRoot", this.scene);
-        
+
         this.scene.registerBeforeRender(() => {
             if (!this.drone) return;
 
-            // Handle takeoff and landing with smooth acceleration/deceleration
             if (this.isFlying && this.drone.position.y < hoverHeight) {
-                // Smooth accelerating takeoff with deceleration near target
                 const heightDifference = hoverHeight - this.drone.position.y;
-                const distanceFactor = Math.min(heightDifference / 2, 1); // Start slowing down halfway
+                const distanceFactor = Math.min(heightDifference / 2, 1);
                 const targetSpeed = Math.max(
                     minTakeoffSpeed,
                     Math.min(maxTakeoffSpeed, heightDifference * 0.1) * distanceFactor
@@ -909,16 +814,13 @@ class XRScene {
                     }
                     
                     this.drone.position.y += verticalTransitionVelocity;
-                    
-                    // Reduce wobble as it reaches target
                     const wobbleFactor = Math.min(distanceFactor, 0.5);
                     this.drone.rotation.x = (Math.random() - 0.5) * 0.05 * wobbleFactor;
                     this.drone.rotation.z = (Math.random() - 0.5) * 0.05 * wobbleFactor;
                 }
             } else if (!this.isFlying && this.drone.position.y > targetLandingHeight) {
-                // Smooth decelerating landing
                 const heightDifference = this.drone.position.y - targetLandingHeight;
-                const distanceFactor = Math.min(heightDifference / 2, 1); // Start slowing down halfway
+                const distanceFactor = Math.min(heightDifference / 2, 1);
                 const targetSpeed = Math.max(
                     minTakeoffSpeed,
                     Math.min(maxTakeoffSpeed, heightDifference * 0.1) * distanceFactor
@@ -932,31 +834,22 @@ class XRScene {
                     }
                     
                     this.drone.position.y -= verticalTransitionVelocity;
-                    
-                    // Reduce wobble as it approaches ground
                     const wobbleFactor = Math.min(distanceFactor, 0.5);
                     this.drone.rotation.x = (Math.random() - 0.5) * 0.03 * wobbleFactor;
                     this.drone.rotation.z = (Math.random() - 0.5) * 0.03 * wobbleFactor;
                 }
             } else {
-                // Reset vertical transition velocity when not transitioning
                 verticalTransitionVelocity = 0;
-                
-                // If landed, ensure drone is level
                 if (!this.isFlying && this.drone.position.y <= targetLandingHeight + 0.01) {
                     this.drone.rotation.x = 0;
                     this.drone.rotation.z = 0;
                 }
             }
-
-            // Modify the transition check to be more precise
-            const isTransitioning = 
-                (this.isFlying && this.drone.position.y < hoverHeight - 0.01) || 
+            const isTransitioning =
+                (this.isFlying && this.drone.position.y < hoverHeight - 0.01) ||
                 (!this.isFlying && this.drone.position.y > targetLandingHeight + 0.01);
 
-            // Only allow movement controls when flying (remove the transition check)
             if (this.isFlying) {
-                // Forward/Backward movement
                 if (keysPressed["ArrowUp"]) {
                     velocity.z = Math.min(velocity.z + acceleration, maxSpeed);
                     this.drone.rotation.x = maxTilt * (velocity.z / maxSpeed);
@@ -970,8 +863,6 @@ class XRScene {
                         this.drone.rotation.x = maxTilt * (velocity.z / maxSpeed);
                     }
                 }
-
-                // Left/Right movement
                 if (keysPressed["ArrowLeft"]) {
                     velocity.x = Math.max(velocity.x - acceleration, -maxSpeed);
                     this.drone.rotation.z = -maxTilt * (velocity.x / maxSpeed);
@@ -985,8 +876,6 @@ class XRScene {
                         this.drone.rotation.z = -maxTilt * (velocity.x / maxSpeed);
                     }
                 }
-
-                // Vertical movement
                 if (keysPressed["PageUp"]) {
                     velocity.y = Math.min(velocity.y + acceleration, maxSpeed);
                 } else if (keysPressed["PageDown"]) {
@@ -997,13 +886,9 @@ class XRScene {
                         if (Math.abs(velocity.y) < 0.001) velocity.y = 0;
                     }
                 }
-
-                // Apply velocities
                 this.drone.position.x += velocity.x;
                 this.drone.position.y += velocity.y;
                 this.drone.position.z += velocity.z;
-
-                // Check track boundaries
                 if (this.drone.position.z > finishLinePosition) {
                     this.drone.position.z = finishLinePosition;
                     velocity.z = 0;
@@ -1012,19 +897,14 @@ class XRScene {
                     this.drone.position.z = startPosition;
                     velocity.z = 0;
                 }
-
-                // Side boundaries
                 const sideLimit = this.trackWidth/2 - 0.4;
                 if (Math.abs(this.drone.position.x) > sideLimit) {
                     this.drone.position.x = Math.sign(this.drone.position.x) * sideLimit;
                     velocity.x = 0;
                 }
             }
-
-            // Camera follow logic - modified for XR
-            if (this.cameraMode === 1) { // Follow behind
+            if (this.cameraMode === 1) {
                 if (this.scene.activeCamera.inputSource?.xrInput) {
-                    // In VR, move the scene root instead of the camera
                     const targetPosition = new BABYLON.Vector3(
                         -this.drone.absolutePosition.x,
                         -this.drone.absolutePosition.y,
@@ -1037,7 +917,6 @@ class XRScene {
                         0.1
                     );
                 } else {
-                    // Regular camera follow for non-VR
                     const behind = new BABYLON.Vector3(
                         this.drone.position.x,
                         this.drone.position.y + followHeight,
@@ -1052,10 +931,9 @@ class XRScene {
                     
                     this.camera.setTarget(this.drone.position);
                 }
-            } 
-            else if (this.cameraMode === 2) { // Side view
+            }
+            else if (this.cameraMode === 2) {
                 if (this.scene.activeCamera.inputSource?.xrInput) {
-                    // In VR, move the scene root instead of the camera
                     const targetPosition = new BABYLON.Vector3(
                         -this.drone.absolutePosition.x + sideViewDistance,
                         -this.drone.absolutePosition.y,
@@ -1068,7 +946,6 @@ class XRScene {
                         0.1
                     );
                 } else {
-                    // Regular side view for non-VR
                     const side = new BABYLON.Vector3(
                         this.drone.position.x - sideViewDistance,
                         this.drone.position.y + followHeight,
@@ -1085,7 +962,6 @@ class XRScene {
                 }
             }
             else if (this.cameraMode === 0 && this.scene.activeCamera.inputSource?.xrInput) {
-                // Reset scene position in stationary mode for VR
                 const targetPosition = new BABYLON.Vector3(
                     0,
                     0,
@@ -1098,41 +974,28 @@ class XRScene {
                     0.1
                 );
             }
-
-            // Adjust propeller rotation based on state
-            for(let i = 0; i < 4; i++) {
+            for (let i = 0; i < 4; i++) {
                 const propeller = this.scene.getMeshByName(`propeller${i}`);
                 let baseSpeed = 0.2;
-                
                 if (this.isFlying) {
                     if (isTransitioning) {
-                        // Faster during takeoff/landing
                         baseSpeed = 0.4;
                     } else {
-                        // Normal flying speed plus movement
                         baseSpeed = 0.2 + (Math.abs(velocity.x) + Math.abs(velocity.y) + Math.abs(velocity.z)) * 0.2;
                     }
                 } else {
                     if (isTransitioning) {
-                        // Slowing down during landing
                         baseSpeed = 0.3 * (this.drone.position.y - targetLandingHeight) / (hoverHeight - targetLandingHeight);
                     } else {
-                        // Stopped
                         baseSpeed = 0;
                     }
                 }
-                
                 propeller.rotation.y += baseSpeed;
             }
-
-            // Handle XR mode changes
             const isInXR = this.scene.activeCamera?.inputSource?.xrInput;
-            
             if (isInXR) {
-                // In XR mode, parent scene objects to scene root
                 this.scene.meshes.forEach(mesh => {
-                    // Don't parent camera or drone parts
-                    if (mesh.name !== "camera" && 
+                    if (mesh.name !== "camera" &&
                         !mesh.parent && 
                         !mesh.name.includes("drone") && 
                         !mesh.name.includes("propeller") && 
@@ -1140,31 +1003,25 @@ class XRScene {
                         mesh.parent = this.sceneRoot;
                     }
                 });
-                // Parent the drone container to scene root
                 if (this.droneContainer && !this.droneContainer.parent) {
                     this.droneContainer.parent = this.sceneRoot;
                 }
             } else {
-                // In non-XR mode, unparent everything from scene root
                 this.scene.meshes.forEach(mesh => {
                     if (mesh.parent === this.sceneRoot) {
                         mesh.parent = null;
                     }
                 });
-                // Unparent drone container
                 if (this.droneContainer && this.droneContainer.parent === this.sceneRoot) {
                     this.droneContainer.parent = null;
                 }
-                
-                // Reset scene root position
                 this.sceneRoot.position = BABYLON.Vector3.Zero();
             }
         });
     }
 }
 
-// Initialize the XR scene when the window loads
+// Bootstrap: once the DOM is ready, create the single XRScene instance (canvas, engine, scene, XR, MQTT).
 window.addEventListener("DOMContentLoaded", () => {
-    console.log("14");
     new XRScene();
 }); 

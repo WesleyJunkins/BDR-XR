@@ -1,22 +1,29 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <!-- Character encoding for proper display of text -->
     <meta charset="utf-8">
+    <!-- Page title shown in browser tab -->
     <title>WebXR with Babylon.js</title>
+    <!-- Viewport meta tag for responsive behavior on mobile devices -->
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <!-- Babylon.js CDN -->
+    <!-- Babylon.js core engine: 3D rendering, scene graph, and WebGL context -->
     <script src="https://cdn.babylonjs.com/babylon.js"></script>
+    <!-- Babylon.js loaders: import external 3D model formats (e.g. glTF) if needed -->
     <script src="https://cdn.babylonjs.com/loaders/babylonjs.loaders.min.js"></script>
+    <!-- Babylon.js GUI: 2D overlay UI (buttons, panels) and 3D GUI in the scene -->
     <script src="https://cdn.babylonjs.com/gui/babylon.gui.min.js"></script>
-    
-    <!-- Add Water Material -->
+    <!-- Babylon.js materials library: includes WaterMaterial for the ocean/water effect -->
     <script src="https://cdn.babylonjs.com/materialsLibrary/babylonjs.materials.min.js"></script>
+    <!-- MQTT.js browser build: enables WebSocket MQTT connection to receive EEG data in the browser -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
-    <!-- Your custom files -->
+    <!-- Project styles: fullscreen canvas and XR button appearance -->
     <link rel="stylesheet" href="styles.css">
+    <!-- Main application: XRScene class, 3D world, drone, MQTT, and controls (defer = run after HTML parsed) -->
     <script src="app.js" defer></script>
 </head>
 <body>
+    <!-- Single fullscreen canvas where Babylon.js renders the 3D/WebXR scene -->
     <canvas id="renderCanvas"></canvas>
 </body>
-</html> 
+</html>
