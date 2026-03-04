@@ -662,18 +662,15 @@ class XRScene {
             }
         });
 
-        // Update the panel follow behavior
+        // Update the panel follow behavior: position panel at camera + offset each frame
         this.scene.registerBeforeRender(() => {
             if (xrHelper.baseExperience && xrHelper.baseExperience.camera) {
                 const camera = xrHelper.baseExperience.camera;
                 panel.position = new BABYLON.Vector3(
-                    camera.position.x + (forward.x * this.panelOffset.z) + (right.x * this.panelOffset.x),
+                    camera.position.x + this.panelOffset.x,
                     camera.position.y + this.panelOffset.y,
-                    camera.position.z + (forward.z * this.panelOffset.z) + (right.z * this.panelOffset.x)
+                    camera.position.z + this.panelOffset.z
                 );
-                
-                // Make panel face the user
-                panel.lookAt(camera.position);
             }
         });
     }
