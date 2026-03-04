@@ -97,8 +97,6 @@ The project supports two ways to run:
 - **Standalone MQTT:** From the project root run `npm install` then `npm start` (or `node mqtt_client.js`).
 - **Modifying behavior:** Change track size or layout in `createScene` (dimensions and mesh positions). Change drone shape or start position in `createDrone`. Change movement speeds and boundaries in `setupDroneControls` (keyboard) and `setupXRControllers` (VR). Change MQTT topic or broker in `initializeMQTT` and in `mqtt_client.js`. To drive nudge or other behavior from the power value, use `this.latestPowerValue` inside the nudge observer or elsewhere in `app.js`.
 
-## MQTT Info
+### Broker configuration
 
-- HiveMQ
-- Get Email and Password from Wes
-- See default options in the program, use the same username and password, copy/paste new cluster URL.
+The web app and the standalone MQTT client both use HiveMQ Cloud (WSS). Broker hostname, port, username, and password are set in `initializeMQTT()` in `app.js` and in `mqtt_client.js`. To use a different HiveMQ cluster, update the `hostname` (and optionally `port`) in both places; keep the same username and password, or obtain new credentials from the project maintainer and update the config accordingly.
