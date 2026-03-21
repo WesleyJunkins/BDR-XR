@@ -38,7 +38,7 @@ class XRScene {
         // Broker connection settings for browser (WSS); must match connector/backend broker
         const brokerConfig = {
             protocol: 'wss',
-            hostname: '21c4029e653247699764b7b976972f4f.s1.eu.hivemq.cloud',
+            hostname: '74d0d17826554a14a59a3c4cec962a8f.s1.eu.hivemq.cloud',
             port: 8884,
             username: 'bdrXR1crimson',
             password: 'bdrXR1crimson',
