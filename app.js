@@ -11,14 +11,16 @@ class XRScene {
         // Resolve the canvas element that Babylon.js will use for WebGL rendering
         this.canvas = document.getElementById("renderCanvas");
         // Create the Babylon engine (WebGL 2/1, antialias enabled) bound to the canvas
-        this.engine = new BABYLON.Engine(this.canvas, true);
+        // adaptToDeviceRatio: false reduces pixel fill on HiDPI (often +30–50% FPS); slightly softer image
+        this.engine = new BABYLON.Engine(this.canvas, true, {
+            adaptToDeviceRatio: false,
+            powerPreference: "high-performance"
+        });
 
         // When MQTT avg relative beta (focusComponents.avgRelativeBeta, same units as threshold) exceeds this while flying, auto-nudge once; then wait before next check
         this.powerNudgeThreshold = 0.6;
         this.powerNudgeCooldownMs = 1000;
         this._powerNudgeCooldownUntil = 0;
-        this.latestPowerValue = "0.000";
-        this.latestAvgRelativeBeta = null;
 
         // Build the scene: camera, lights, drone, environment (sky, ground, track), and 2D GUI
         this.createScene();
@@ -35,15 +37,14 @@ class XRScene {
 
         // Set up WebXR (VR) support: default XR experience, VR UI panel, and controller input
         this.initializeXR();
-        // Connect to MQTT broker and subscribe for EEG power values; updates nudge button label
+        // Connect to MQTT broker and subscribe for EEG / threshold (auto-nudge only; no on-screen telemetry)
         this.initializeMQTT();
     }
 
     /**
      * Connects to the MQTT broker (HiveMQ Cloud) and subscribes to the connector topic.
-     * Incoming messages are expected to be JSON with processedData.powerValue, optional
-     * processedData.threshold, and processedData.focusComponents.avgRelativeBeta (see parseAvgRelativeBetaFromProcessedData).
-     * powerValue is stored in latestPowerValue and shown on the telemetry line. threshold updates powerNudgeThreshold when it differs from the current value.
+     * Incoming messages: optional processedData.threshold; processedData.focusComponents.avgRelativeBeta
+     * (see parseAvgRelativeBetaFromProcessedData). threshold updates powerNudgeThreshold when it differs.
      * If avgRelativeBeta (number) >= powerNudgeThreshold while flying, startNudgeForward runs once
      * per cooldown window (powerNudgeCooldownMs).
      */
@@ -83,7 +84,6 @@ class XRScene {
             });
         });
 
-        // For each message on the topic: parse JSON and update latestPowerValue and VR nudge button
         this.mqttClient.on('message', (topic, message) => {
             try {
                 const data = JSON.parse(message.toString());
@@ -95,22 +95,14 @@ class XRScene {
                             this.powerNudgeThreshold = thresholdNum;
                         }
                     }
-                    if (pd.powerValue != null && pd.powerValue !== '') {
-                        this.latestPowerValue = pd.powerValue;
-                        console.log(`Power Value: ${this.latestPowerValue}%`);
-                    }
                     const avgRelBeta = this.parseAvgRelativeBetaFromProcessedData(pd);
-                    if (avgRelBeta !== null) {
-                        this.latestAvgRelativeBeta = avgRelBeta;
-                        if (avgRelBeta >= this.powerNudgeThreshold) {
-                            const now = Date.now();
-                            if (now >= this._powerNudgeCooldownUntil) {
-                                this._powerNudgeCooldownUntil = now + this.powerNudgeCooldownMs;
-                                this.startNudgeForward();
-                            }
+                    if (avgRelBeta !== null && avgRelBeta >= this.powerNudgeThreshold) {
+                        const now = Date.now();
+                        if (now >= this._powerNudgeCooldownUntil) {
+                            this._powerNudgeCooldownUntil = now + this.powerNudgeCooldownMs;
+                            this.startNudgeForward();
                         }
                     }
-                    this.updateTelemetryDisplays();
                 }
             } catch (error) {
                 console.error('Error parsing message:', error);
@@ -154,25 +146,6 @@ class XRScene {
         }
         const n = typeof raw === "number" ? raw : Number(String(raw).trim());
         return Number.isFinite(n) ? n : null;
-    }
-
-    /**
-     * Updates desktop telemetry line and VR nudge label: power (focus %) and Avg Rel Beta (same value as threshold check).
-     */
-    updateTelemetryDisplays() {
-        const powerStr = this.latestPowerValue != null && this.latestPowerValue !== ''
-            ? String(this.latestPowerValue)
-            : "—";
-        const betaStr = typeof this.latestAvgRelativeBeta === "number" && Number.isFinite(this.latestAvgRelativeBeta)
-            ? String(this.latestAvgRelativeBeta)
-            : "—";
-        const line = `Power: ${powerStr}%  |  Avg Rel Beta: ${betaStr}`;
-        if (this.desktopTelemetryText) {
-            this.desktopTelemetryText.text = line;
-        }
-        if (this.nudgeButton) {
-            this.nudgeButton.text = line;
-        }
     }
 
     /**
@@ -266,7 +239,7 @@ class XRScene {
         });
 
         if (!this._finishLineParticleSystem) {
-            const ps = new BABYLON.ParticleSystem("finishLineBurst", 1200, this.scene);
+            const ps = new BABYLON.ParticleSystem("finishLineBurst", 600, this.scene);
             ps.particleTexture = new BABYLON.Texture("https://playground.babylonjs.com/textures/flare.png", this.scene);
             ps.emitter = this.drone;
             ps.minEmitBox = new BABYLON.Vector3(-0.35, -0.05, -0.35);
@@ -278,7 +251,7 @@ class XRScene {
             ps.maxSize = 0.22;
             ps.minLifeTime = 0.15;
             ps.maxLifeTime = 0.65;
-            ps.emitRate = 900;
+            ps.emitRate = 450;
             ps.gravity = new BABYLON.Vector3(0, 0.15, 0);
             ps.direction1 = new BABYLON.Vector3(-1.2, 0.3, -1.2);
             ps.direction2 = new BABYLON.Vector3(1.2, 1.4, 1.2);
@@ -355,7 +328,7 @@ class XRScene {
         const ground = BABYLON.MeshBuilder.CreateGround("ground", {
             width: 512,
             height: 512,
-            subdivisions: 32
+            subdivisions: 8
         }, this.scene);
         ground.position.y = -2;
         ground.material = groundMaterial;
@@ -377,9 +350,9 @@ class XRScene {
         trackMaterial.bumpTexture.vScale = 25;
         trackMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
         trackMaterial.specularPower = 64;
-        trackMaterial.useParallax = true;
-        trackMaterial.useParallaxOcclusion = true;
-        trackMaterial.parallaxScaleBias = 0.1;
+        // Parallax occlusion is costly; bump-only keeps a similar look with less GPU work
+        trackMaterial.useParallax = false;
+        trackMaterial.useParallaxOcclusion = false;
         track.material = trackMaterial;
 
         // Support floor under the track (visually distinct from the racing surface above)
@@ -525,6 +498,10 @@ class XRScene {
         finishLineMaterial.emissiveColor = new BABYLON.Color3(0.5, 0, 0); // Add glow effect
         finishLineMaterial.alpha = 0.8;
         finishLine.material = finishLineMaterial;
+
+        [skybox, ground, track, underFloor, wallNorth, wallSouth, wallEast, wallWest, ceiling, leftLine, rightLine, finishLine].forEach((mesh) => {
+            mesh.freezeWorldMatrix();
+        });
     }
 
     /**
@@ -596,23 +573,18 @@ class XRScene {
     }
 
     /**
-     * Creates the 2D overlay GUI (desktop): fullscreen texture with a button row and a telemetry
-     * line (Power % and Avg Rel Beta, matching MQTT). Buttons: Change View, Lift-Off/Land, Reset Position.
+     * Creates the 2D overlay GUI (desktop): bottom-left strip with Change View, Lift-Off/Land, Reset.
      */
     createGUI() {
         const advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
-        const rootPanel = new BABYLON.GUI.StackPanel();
-        rootPanel.isVertical = true;
-        rootPanel.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-        rootPanel.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
-        rootPanel.left = "20px";
-        rootPanel.top = "-20px";
-        advancedTexture.addControl(rootPanel);
-
-        const buttonRow = new BABYLON.GUI.StackPanel();
-        buttonRow.isVertical = false;
-        buttonRow.height = "40px";
-        rootPanel.addControl(buttonRow);
+        const stackPanel = new BABYLON.GUI.StackPanel();
+        stackPanel.isVertical = false;
+        stackPanel.height = "40px";
+        stackPanel.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+        stackPanel.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
+        stackPanel.left = "20px";
+        stackPanel.top = "-20px";
+        advancedTexture.addControl(stackPanel);
 
         const viewButton = BABYLON.GUI.Button.CreateSimpleButton("viewButton", "Change View (Stationary)");
         viewButton.width = "180px";
@@ -621,7 +593,7 @@ class XRScene {
         viewButton.cornerRadius = 5;
         viewButton.background = "rgba(51, 51, 51, 0.8)";
         viewButton.paddingRight = "10px";
-        buttonRow.addControl(viewButton);
+        stackPanel.addControl(viewButton);
 
         // Create Flight Button
         const flightButton = BABYLON.GUI.Button.CreateSimpleButton("flightButton", "Lift-Off");
@@ -632,7 +604,7 @@ class XRScene {
         flightButton.background = "rgba(51, 51, 51, 0.8)";
         flightButton.paddingRight = "10px";
         flightButton.paddingLeft = "10px";
-        buttonRow.addControl(flightButton);
+        stackPanel.addControl(flightButton);
 
         // Create Reset Button
         const resetButton = BABYLON.GUI.Button.CreateSimpleButton("resetButton", "Reset Position");
@@ -642,16 +614,8 @@ class XRScene {
         resetButton.cornerRadius = 5;
         resetButton.background = "rgba(51, 51, 51, 0.8)";
         resetButton.paddingLeft = "10px";
-        buttonRow.addControl(resetButton);
+        stackPanel.addControl(resetButton);
         this.flightButton = flightButton;
-
-        const telemetryText = new BABYLON.GUI.TextBlock("desktopTelemetry");
-        telemetryText.height = "26px";
-        telemetryText.color = "white";
-        telemetryText.fontSize = 14;
-        telemetryText.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-        rootPanel.addControl(telemetryText);
-        this.desktopTelemetryText = telemetryText;
 
         viewButton.onPointerClickObservable.add(() => {
             this.cameraMode = (this.cameraMode + 1) % 3;
@@ -707,7 +671,6 @@ class XRScene {
                 ));
             }
         });
-        this.updateTelemetryDisplays();
     }
 
     /**
@@ -782,9 +745,9 @@ class XRScene {
     /**
      * Creates the VR 3D UI: a plane panel with holographic buttons (View, Lift-Off, Reset, Nudge).
      * Panel position is updated each frame to follow the XR camera with panelOffset. Q/A, W/S, E/D
-     * adjust panelOffset for layout tuning. Nudge button shows Power % and Avg Rel Beta (same as desktop)
-     * and triggers a short forward burst when pressed while flying. MQTT can also trigger the same
-     * burst when focusComponents.avgRelativeBeta exceeds powerNudgeThreshold, at most once per powerNudgeCooldownMs while flying.
+     * adjust panelOffset for layout tuning. Nudge triggers a short forward burst when pressed while flying.
+     * MQTT can also trigger the same burst when focusComponents.avgRelativeBeta exceeds powerNudgeThreshold,
+     * at most once per powerNudgeCooldownMs while flying.
      */
     createVRUI(xrHelper) {
         this.panelOffset = { x: 0.80, y: -0.90, z: 1.20 };
@@ -837,9 +800,7 @@ class XRScene {
         resetButton.text = "Reset";
         const nudgeButton = new BABYLON.GUI.HolographicButton("nudgeButton");
         panel.addControl(nudgeButton);
-        nudgeButton.text = "Power: 0.000%  |  Avg Rel Beta: —";
-        this.nudgeButton = nudgeButton;
-        this.updateTelemetryDisplays();
+        nudgeButton.text = "Nudge";
 
         viewButton.onPointerUpObservable.add(() => {
             if (xrHelper.baseExperience.state === BABYLON.WebXRState.IN_XR) {
