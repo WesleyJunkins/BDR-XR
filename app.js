@@ -1,7 +1,10 @@
 /**
  * XRScene: Main application class for the BDR-XR WebXR experience.
- * Builds the 3D world (track, water, sky), drone, 2D/VR GUI, MQTT subscription for EEG power,
+ * Builds the 3D world (track, ground, sky), drone, 2D/VR GUI, MQTT subscription for EEG power,
  * and handles keyboard and XR controller input plus camera modes.
+ *
+ * World scale: 1 Babylon.js world unit = 1 foot (imperial). Positions, sizes, and speeds use feet
+ * (or feet per frame for velocities) unless a comment says otherwise.
  */
 class XRScene {
     constructor() {
@@ -10,7 +13,12 @@ class XRScene {
         // Create the Babylon engine (WebGL 2/1, antialias enabled) bound to the canvas
         this.engine = new BABYLON.Engine(this.canvas, true);
 
-        // Build the scene: camera, lights, drone, environment (sky, ground, track, water), and 2D GUI
+        // When MQTT power (%) exceeds this while flying, auto-nudge once; then wait before next check
+        this.powerNudgeThreshold = 70;
+        this.powerNudgeCooldownMs = 1000;
+        this._powerNudgeCooldownUntil = 0;
+
+        // Build the scene: camera, lights, drone, environment (sky, ground, track), and 2D GUI
         this.createScene();
 
         // Run the render loop: each frame calls scene.render() to draw the 3D scene
@@ -33,6 +41,8 @@ class XRScene {
      * Connects to the MQTT broker (HiveMQ Cloud) and subscribes to the connector topic.
      * Incoming messages are expected to be JSON with processedData.powerValue; that value
      * is stored in this.latestPowerValue and reflected on the VR nudge button text.
+     * If parsed power (number) >= powerNudgeThreshold while flying, startNudgeForward runs once
+     * per cooldown window (powerNudgeCooldownMs).
      */
     initializeMQTT() {
         // Broker connection settings for browser (WSS); must match connector/backend broker
@@ -77,11 +87,19 @@ class XRScene {
         this.mqttClient.on('message', (topic, message) => {
             try {
                 const data = JSON.parse(message.toString());
-                if (data.processedData && data.processedData.powerValue) {
+                if (data.processedData && data.processedData.powerValue != null && data.processedData.powerValue !== '') {
                     this.latestPowerValue = data.processedData.powerValue;
                     console.log(`Power Value: ${this.latestPowerValue}%`);
                     if (this.nudgeButton) {
                         this.nudgeButton.text = `Power: ${this.latestPowerValue}%`;
+                    }
+                    const powerNum = parseFloat(String(data.processedData.powerValue).replace(/%/g, '').trim());
+                    if (!Number.isNaN(powerNum) && powerNum >= this.powerNudgeThreshold) {
+                        const now = Date.now();
+                        if (now >= this._powerNudgeCooldownUntil) {
+                            this._powerNudgeCooldownUntil = now + this.powerNudgeCooldownMs;
+                            this.startNudgeForward();
+                        }
                     }
                 }
             } catch (error) {
@@ -101,17 +119,74 @@ class XRScene {
     }
 
     /**
-     * Creates the main Babylon scene: camera, lights, drone, skybox, ground, track, water, finish line.
+     * Short forward burst (same physics as the VR Nudge button). No-op if not flying or no drone.
+     */
+    startNudgeForward() {
+        if (!this.drone || !this.isFlying) {
+            return;
+        }
+        this.nudgeState = {
+            velocity: 0,
+            isNudging: true,
+            acceleration: 0.025,
+            deceleration: 0.01,
+            maxVelocity: 0.15,
+            distanceTraveled: 0,
+            targetDistance: 2.0
+        };
+        if (this.nudgeObserver) {
+            this.scene.onBeforeRenderObservable.remove(this.nudgeObserver);
+        }
+        this.nudgeObserver = this.scene.onBeforeRenderObservable.add(() => {
+            if (!this.nudgeState.isNudging) return;
+
+            const finishLinePosition = this.trackLength / 2 - 2;
+            const currentZ = this.drone.position.z;
+
+            const shouldDecelerate = this.nudgeState.distanceTraveled >= this.nudgeState.targetDistance / 2;
+
+            if (!shouldDecelerate && this.nudgeState.velocity < this.nudgeState.maxVelocity) {
+                this.nudgeState.velocity += this.nudgeState.acceleration;
+                this.drone.rotation.x = Math.min(0.15, this.nudgeState.velocity * 0.5);
+            } else {
+                this.nudgeState.velocity = Math.max(0, this.nudgeState.velocity - this.nudgeState.deceleration);
+                this.drone.rotation.x = Math.max(0, this.drone.rotation.x - 0.01);
+            }
+
+            if (currentZ + this.nudgeState.velocity <= finishLinePosition) {
+                this.drone.position.z += this.nudgeState.velocity;
+                this.nudgeState.distanceTraveled += this.nudgeState.velocity;
+            } else {
+                this.drone.position.z = finishLinePosition;
+                this.nudgeState.isNudging = false;
+            }
+
+            this.drone.position.y += Math.sin(this.scene.getEngine().getDeltaTime() * 0.01) * 0.001;
+
+            if (this.nudgeState.velocity < 0.001 ||
+                this.nudgeState.distanceTraveled >= this.nudgeState.targetDistance) {
+                this.nudgeState.isNudging = false;
+                this.nudgeState.velocity = 0;
+                this.drone.rotation.x = 0;
+                if (this.nudgeObserver) {
+                    this.scene.onBeforeRenderObservable.remove(this.nudgeObserver);
+                    this.nudgeObserver = null;
+                }
+            }
+        });
+    }
+
+    /**
+     * Creates the main Babylon scene: camera, lights, drone, skybox, ground, track, finish line.
      * Also sets initial camera position and registers keyboard controls via setupDroneControls.
      */
     async createScene() {
         this.scene = new BABYLON.Scene(this.engine);
 
-        // World dimensions used by track, boundaries, camera, and drone placement
-        this.trackWidth = 10;
-        this.trackLength = 100;
+        // World dimensions (feet): 1 Babylon unit = 1 ft
+        this.trackWidth = 5;
+        this.trackLength = 25;
         this.trackHeight = 0.3;
-        this.waterLevel = -1;
         this.trackElevation = 10;
 
         // FreeCamera for desktop: orbit/look with mouse; position and target set below
@@ -146,7 +221,7 @@ class XRScene {
         skyboxMaterial.disableLighting = true;
         skybox.material = skyboxMaterial;
 
-        // Ground plane below the water; used in reflections and as visual base
+        // Distant ground plane below the track
         const groundMaterial = new BABYLON.StandardMaterial("groundMaterial", this.scene);
         groundMaterial.diffuseTexture = new BABYLON.Texture("https://playground.babylonjs.com/textures/ground.jpg", this.scene);
         groundMaterial.diffuseTexture.uScale = 4;
@@ -157,7 +232,7 @@ class XRScene {
             height: 512,
             subdivisions: 32
         }, this.scene);
-        ground.position.y = this.waterLevel - 1;
+        ground.position.y = -2;
         ground.material = groundMaterial;
 
         // Floating racetrack platform (box) at trackElevation; also used as XR floor mesh
@@ -170,17 +245,106 @@ class XRScene {
 
         const trackMaterial = new BABYLON.StandardMaterial("trackMaterial", this.scene);
         trackMaterial.diffuseTexture = new BABYLON.Texture("assets/floor.png", this.scene);
-        trackMaterial.diffuseTexture.uScale = 10;
-        trackMaterial.diffuseTexture.vScale = 100;
+        trackMaterial.diffuseTexture.uScale = 5;
+        trackMaterial.diffuseTexture.vScale = 25;
         trackMaterial.bumpTexture = new BABYLON.Texture("assets/floor_bump.PNG", this.scene);
-        trackMaterial.bumpTexture.uScale = 10;
-        trackMaterial.bumpTexture.vScale = 100;
+        trackMaterial.bumpTexture.uScale = 5;
+        trackMaterial.bumpTexture.vScale = 25;
         trackMaterial.specularColor = new BABYLON.Color3(0.1, 0.1, 0.1);
         trackMaterial.specularPower = 64;
         trackMaterial.useParallax = true;
         trackMaterial.useParallaxOcclusion = true;
         trackMaterial.parallaxScaleBias = 0.1;
         track.material = trackMaterial;
+
+        // Support floor under the track (visually distinct from the racing surface above)
+        const underFloorGap = 0.05;
+        const underFloorThickness = 0.5;
+        const underFloorY = this.trackElevation - this.trackHeight / 2 - underFloorGap - underFloorThickness / 2;
+        const underFloorExtraWidth = 4;
+        const underFloorExtraLength = 10;
+        const floorWidth = (this.trackWidth + underFloorExtraWidth) * 2;
+        const floorDepth = (this.trackLength + underFloorExtraLength) * 2;
+        const underFloor = BABYLON.MeshBuilder.CreateBox("underTrackFloor", {
+            width: floorWidth,
+            height: underFloorThickness,
+            depth: floorDepth
+        }, this.scene);
+        underFloor.position.y = underFloorY;
+        const underFloorMat = new BABYLON.StandardMaterial("underTrackFloorMat", this.scene);
+        underFloorMat.diffuseTexture = new BABYLON.Texture("https://playground.babylonjs.com/textures/wood.jpg", this.scene);
+        underFloorMat.diffuseTexture.uScale = 6;
+        underFloorMat.diffuseTexture.vScale = 22;
+        underFloorMat.diffuseColor = new BABYLON.Color3(0.85, 0.85, 0.9);
+        underFloorMat.specularColor = new BABYLON.Color3(0.15, 0.15, 0.15);
+        underFloor.material = underFloorMat;
+
+        // Perimeter walls: outer edge of the floor slab, 5 ft tall; crate texture (not wood floor / not racing track)
+        const wallHeight = 5;
+        const wallThickness = 0.25;
+        const floorTopY = underFloorY + underFloorThickness / 2;
+        const wallCenterY = floorTopY + wallHeight / 2;
+        const halfFloorW = floorWidth / 2;
+        const halfFloorD = floorDepth / 2;
+        const wallMaterial = new BABYLON.StandardMaterial("perimeterWallMat", this.scene);
+        wallMaterial.diffuseTexture = new BABYLON.Texture("https://playground.babylonjs.com/textures/crate.png", this.scene);
+        wallMaterial.diffuseTexture.uScale = 5;
+        wallMaterial.diffuseTexture.vScale = 3;
+        wallMaterial.specularColor = new BABYLON.Color3(0.08, 0.08, 0.08);
+
+        const wallNorth = BABYLON.MeshBuilder.CreateBox("wallNorth", {
+            width: floorWidth + 2 * wallThickness,
+            height: wallHeight,
+            depth: wallThickness
+        }, this.scene);
+        wallNorth.position = new BABYLON.Vector3(0, wallCenterY, halfFloorD + wallThickness / 2);
+        wallNorth.material = wallMaterial;
+
+        const wallSouth = BABYLON.MeshBuilder.CreateBox("wallSouth", {
+            width: floorWidth + 2 * wallThickness,
+            height: wallHeight,
+            depth: wallThickness
+        }, this.scene);
+        wallSouth.position = new BABYLON.Vector3(0, wallCenterY, -halfFloorD - wallThickness / 2);
+        wallSouth.material = wallMaterial;
+
+        const wallEast = BABYLON.MeshBuilder.CreateBox("wallEast", {
+            width: wallThickness,
+            height: wallHeight,
+            depth: floorDepth + 2 * wallThickness
+        }, this.scene);
+        wallEast.position = new BABYLON.Vector3(halfFloorW + wallThickness / 2, wallCenterY, 0);
+        wallEast.material = wallMaterial;
+
+        const wallWest = BABYLON.MeshBuilder.CreateBox("wallWest", {
+            width: wallThickness,
+            height: wallHeight,
+            depth: floorDepth + 2 * wallThickness
+        }, this.scene);
+        wallWest.position = new BABYLON.Vector3(-halfFloorW - wallThickness / 2, wallCenterY, 0);
+        wallWest.material = wallMaterial;
+
+        // Ceiling: same outer footprint as the wall rectangle, flush on top of the walls
+        const ceilingThickness = 0.2;
+        const wallTopY = floorTopY + wallHeight;
+        const ceilingCenterY = wallTopY + ceilingThickness / 2;
+        const ceilingOuterW = floorWidth + 2 * wallThickness;
+        const ceilingOuterD = floorDepth + 2 * wallThickness;
+        const ceiling = BABYLON.MeshBuilder.CreateBox("perimeterCeiling", {
+            width: ceilingOuterW,
+            height: ceilingThickness,
+            depth: ceilingOuterD
+        }, this.scene);
+        ceiling.position.y = ceilingCenterY;
+        const ceilingMat = new BABYLON.StandardMaterial("perimeterCeilingMat", this.scene);
+        const ceilingTone = new BABYLON.Color3(0.88, 0.82, 0.72);
+        ceilingMat.diffuseColor = ceilingTone;
+        ceilingMat.specularColor = new BABYLON.Color3(0.14, 0.13, 0.11);
+        // Interior (down-facing) polys get no useful diffuse from the overhead hemispheric light; unlit emissive matches top and bottom to the same dark white
+        ceilingMat.disableLighting = true;
+        ceilingMat.emissiveColor = ceilingTone;
+        ceilingMat.backFaceCulling = false;
+        ceiling.material = ceilingMat;
 
         // Two thin strips (left/right) on the track to suggest lane boundaries
         const lineWidth = 0.3;
@@ -204,31 +368,6 @@ class XRScene {
         lineMaterial.specularColor = new BABYLON.Color3(0.3, 0.3, 0.3);
         leftLine.material = lineMaterial;
         rightLine.material = lineMaterial;
-
-        // Water plane at waterLevel; uses WaterMaterial for animated waves and reflections
-        const waterMesh = BABYLON.MeshBuilder.CreateGround("waterMesh", {
-            width: 512,
-            height: 512,
-            subdivisions: 64
-        }, this.scene);
-        waterMesh.position.y = this.waterLevel;
-
-        const water = new BABYLON.WaterMaterial("water", this.scene);
-        water.windForce = -15;
-        water.waveHeight = 0.5;
-        water.windDirection = new BABYLON.Vector2(1, 1);
-        water.waterColor = new BABYLON.Color3(0, 0.3, 0.5);
-        water.colorBlendFactor = 0.1;
-        water.waveLength = 0.005;
-        water.waveSpeed = 40.0;
-        water.bumpHeight = 0.001;
-        water.waveCount = 80;
-        water.addToRenderList(skybox);
-        water.addToRenderList(track);
-        water.addToRenderList(leftLine);
-        water.addToRenderList(rightLine);
-        water.addToRenderList(ground);
-        waterMesh.material = water;
 
         // Initial camera: centered on track, looking down the length; height above track
         const cameraHeight = 2.2;
@@ -504,7 +643,8 @@ class XRScene {
      * Creates the VR 3D UI: a plane panel with holographic buttons (View, Lift-Off, Reset, Nudge).
      * Panel position is updated each frame to follow the XR camera with panelOffset. Q/A, W/S, E/D
      * adjust panelOffset for layout tuning. Nudge button shows latest MQTT power and triggers a
-     * short forward burst (accel then decel) when pressed while flying.
+     * short forward burst when pressed while flying. MQTT can also trigger the same burst when
+     * power exceeds powerNudgeThreshold, at most once per powerNudgeCooldownMs while flying.
      */
     createVRUI(xrHelper) {
         this.panelOffset = { x: 0.80, y: -0.90, z: 1.20 };
@@ -594,72 +734,8 @@ class XRScene {
             flightButton.text = "Lift-Off";
         });
 
-        // Add Nudge Forward button handler
         nudgeButton.onPointerUpObservable.add(() => {
-            if (this.drone && this.isFlying) {
-                // Initialize or reset nudge state
-                this.nudgeState = {
-                    velocity: 0,
-                    isNudging: true,
-                    acceleration: 0.025,
-                    deceleration: 0.01,
-                    maxVelocity: 0.15,
-                    distanceTraveled: 0,
-                    targetDistance: 2.0  // Total distance to travel
-                };
-
-                // Remove existing observer if it exists
-                if (this.nudgeObserver) {
-                    this.scene.onBeforeRenderObservable.remove(this.nudgeObserver);
-                }
-
-                // Create new observer for the nudge physics
-                this.nudgeObserver = this.scene.onBeforeRenderObservable.add(() => {
-                    if (!this.nudgeState.isNudging) return;
-
-                    const finishLinePosition = this.trackLength/2 - 2;
-                    const currentZ = this.drone.position.z;
-
-                    // Determine if we should start decelerating
-                    const shouldDecelerate = this.nudgeState.distanceTraveled >= this.nudgeState.targetDistance/2;
-
-                    if (!shouldDecelerate && this.nudgeState.velocity < this.nudgeState.maxVelocity) {
-                        // Acceleration phase
-                        this.nudgeState.velocity += this.nudgeState.acceleration;
-                        this.drone.rotation.x = Math.min(0.15, this.nudgeState.velocity * 0.5);
-                    } else {
-                        // Deceleration phase
-                        this.nudgeState.velocity = Math.max(0, this.nudgeState.velocity - this.nudgeState.deceleration);
-                        this.drone.rotation.x = Math.max(0, this.drone.rotation.x - 0.01);
-                    }
-
-                    // Move drone forward if within bounds
-                    if (currentZ + this.nudgeState.velocity <= finishLinePosition) {
-                        this.drone.position.z += this.nudgeState.velocity;
-                        this.nudgeState.distanceTraveled += this.nudgeState.velocity;
-                    } else {
-                        this.drone.position.z = finishLinePosition;
-                        this.nudgeState.isNudging = false;
-                    }
-
-                    // Add subtle hovering effect
-                    this.drone.position.y += Math.sin(this.scene.getEngine().getDeltaTime() * 0.01) * 0.001;
-
-                    // Stop conditions
-                    if (this.nudgeState.velocity < 0.001 || 
-                        this.nudgeState.distanceTraveled >= this.nudgeState.targetDistance) {
-                        this.nudgeState.isNudging = false;
-                        this.nudgeState.velocity = 0;
-                        this.drone.rotation.x = 0;
-                        
-                        // Clean up the observer
-                        if (this.nudgeObserver) {
-                            this.scene.onBeforeRenderObservable.remove(this.nudgeObserver);
-                            this.nudgeObserver = null;
-                        }
-                    }
-                });
-            }
+            this.startNudgeForward();
         });
 
         // Update the panel follow behavior: position panel at camera + offset each frame
