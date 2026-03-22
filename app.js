@@ -39,8 +39,9 @@ class XRScene {
 
     /**
      * Connects to the MQTT broker (HiveMQ Cloud) and subscribes to the connector topic.
-     * Incoming messages are expected to be JSON with processedData.powerValue; that value
-     * is stored in this.latestPowerValue and reflected on the VR nudge button text.
+     * Incoming messages are expected to be JSON with processedData.powerValue and optional
+     * processedData.threshold. powerValue is stored in latestPowerValue and shown on the nudge button.
+     * threshold updates powerNudgeThreshold when it differs from the current value.
      * If parsed power (number) >= powerNudgeThreshold while flying, startNudgeForward runs once
      * per cooldown window (powerNudgeCooldownMs).
      */
@@ -87,18 +88,27 @@ class XRScene {
         this.mqttClient.on('message', (topic, message) => {
             try {
                 const data = JSON.parse(message.toString());
-                if (data.processedData && data.processedData.powerValue != null && data.processedData.powerValue !== '') {
-                    this.latestPowerValue = data.processedData.powerValue;
-                    console.log(`Power Value: ${this.latestPowerValue}%`);
-                    if (this.nudgeButton) {
-                        this.nudgeButton.text = `Power: ${this.latestPowerValue}%`;
+                const pd = data.processedData;
+                if (pd) {
+                    if (pd.threshold != null && pd.threshold !== '') {
+                        const thresholdNum = Number(pd.threshold);
+                        if (!Number.isNaN(thresholdNum) && thresholdNum !== this.powerNudgeThreshold) {
+                            this.powerNudgeThreshold = thresholdNum;
+                        }
                     }
-                    const powerNum = parseFloat(String(data.processedData.powerValue).replace(/%/g, '').trim());
-                    if (!Number.isNaN(powerNum) && powerNum >= this.powerNudgeThreshold) {
-                        const now = Date.now();
-                        if (now >= this._powerNudgeCooldownUntil) {
-                            this._powerNudgeCooldownUntil = now + this.powerNudgeCooldownMs;
-                            this.startNudgeForward();
+                    if (pd.powerValue != null && pd.powerValue !== '') {
+                        this.latestPowerValue = pd.powerValue;
+                        console.log(`Power Value: ${this.latestPowerValue}%`);
+                        if (this.nudgeButton) {
+                            this.nudgeButton.text = `Power: ${this.latestPowerValue}%`;
+                        }
+                        const powerNum = parseFloat(String(pd.powerValue).replace(/%/g, '').trim());
+                        if (!Number.isNaN(powerNum) && powerNum >= this.powerNudgeThreshold) {
+                            const now = Date.now();
+                            if (now >= this._powerNudgeCooldownUntil) {
+                                this._powerNudgeCooldownUntil = now + this.powerNudgeCooldownMs;
+                                this.startNudgeForward();
+                            }
                         }
                     }
                 }
