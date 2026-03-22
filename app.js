@@ -13,10 +13,12 @@ class XRScene {
         // Create the Babylon engine (WebGL 2/1, antialias enabled) bound to the canvas
         this.engine = new BABYLON.Engine(this.canvas, true);
 
-        // When MQTT power (%) exceeds this while flying, auto-nudge once; then wait before next check
-        this.powerNudgeThreshold = 70;
+        // When MQTT avg relative beta (focusComponents.avgRelativeBeta, same units as threshold) exceeds this while flying, auto-nudge once; then wait before next check
+        this.powerNudgeThreshold = 0.6;
         this.powerNudgeCooldownMs = 1000;
         this._powerNudgeCooldownUntil = 0;
+        this.latestPowerValue = "0.000";
+        this.latestAvgRelativeBeta = null;
 
         // Build the scene: camera, lights, drone, environment (sky, ground, track), and 2D GUI
         this.createScene();
@@ -39,10 +41,10 @@ class XRScene {
 
     /**
      * Connects to the MQTT broker (HiveMQ Cloud) and subscribes to the connector topic.
-     * Incoming messages are expected to be JSON with processedData.powerValue and optional
-     * processedData.threshold. powerValue is stored in latestPowerValue and shown on the nudge button.
-     * threshold updates powerNudgeThreshold when it differs from the current value.
-     * If parsed power (number) >= powerNudgeThreshold while flying, startNudgeForward runs once
+     * Incoming messages are expected to be JSON with processedData.powerValue, optional
+     * processedData.threshold, and processedData.focusComponents.avgRelativeBeta (see parseAvgRelativeBetaFromProcessedData).
+     * powerValue is stored in latestPowerValue and shown on the telemetry line. threshold updates powerNudgeThreshold when it differs from the current value.
+     * If avgRelativeBeta (number) >= powerNudgeThreshold while flying, startNudgeForward runs once
      * per cooldown window (powerNudgeCooldownMs).
      */
     initializeMQTT() {
@@ -69,9 +71,6 @@ class XRScene {
             port: brokerConfig.port,
             protocol: brokerConfig.protocol
         });
-        // Default power value shown until first MQTT message arrives
-        this.latestPowerValue = "0.000";
-
         // When connected to the broker, subscribe to the connector topic
         this.mqttClient.on('connect', () => {
             console.log('Connected to MQTT broker');
@@ -99,11 +98,11 @@ class XRScene {
                     if (pd.powerValue != null && pd.powerValue !== '') {
                         this.latestPowerValue = pd.powerValue;
                         console.log(`Power Value: ${this.latestPowerValue}%`);
-                        if (this.nudgeButton) {
-                            this.nudgeButton.text = `Power: ${this.latestPowerValue}%`;
-                        }
-                        const powerNum = parseFloat(String(pd.powerValue).replace(/%/g, '').trim());
-                        if (!Number.isNaN(powerNum) && powerNum >= this.powerNudgeThreshold) {
+                    }
+                    const avgRelBeta = this.parseAvgRelativeBetaFromProcessedData(pd);
+                    if (avgRelBeta !== null) {
+                        this.latestAvgRelativeBeta = avgRelBeta;
+                        if (avgRelBeta >= this.powerNudgeThreshold) {
                             const now = Date.now();
                             if (now >= this._powerNudgeCooldownUntil) {
                                 this._powerNudgeCooldownUntil = now + this.powerNudgeCooldownMs;
@@ -111,6 +110,7 @@ class XRScene {
                             }
                         }
                     }
+                    this.updateTelemetryDisplays();
                 }
             } catch (error) {
                 console.error('Error parsing message:', error);
@@ -129,6 +129,53 @@ class XRScene {
     }
 
     /**
+     * Reads average relative β power from processedData.focusComponents.avgRelativeBeta.
+     * Fallback: focusComponents.aveRelativeBeta if the payload uses that spelling.
+     */
+    parseAvgRelativeBetaFromProcessedData(pd) {
+        if (!pd || typeof pd !== "object") {
+            return null;
+        }
+        const fc = pd.focusComponents;
+        if (!fc || typeof fc !== "object") {
+            return null;
+        }
+        const raw = fc.avgRelativeBeta !== undefined && fc.avgRelativeBeta !== null
+            ? fc.avgRelativeBeta
+            : fc.aveRelativeBeta;
+        if (raw === undefined || raw === null) {
+            return null;
+        }
+        if (typeof raw === "string") {
+            const t = raw.trim();
+            if (t === "") {
+                return null;
+            }
+        }
+        const n = typeof raw === "number" ? raw : Number(String(raw).trim());
+        return Number.isFinite(n) ? n : null;
+    }
+
+    /**
+     * Updates desktop telemetry line and VR nudge label: power (focus %) and Avg Rel Beta (same value as threshold check).
+     */
+    updateTelemetryDisplays() {
+        const powerStr = this.latestPowerValue != null && this.latestPowerValue !== ''
+            ? String(this.latestPowerValue)
+            : "—";
+        const betaStr = typeof this.latestAvgRelativeBeta === "number" && Number.isFinite(this.latestAvgRelativeBeta)
+            ? String(this.latestAvgRelativeBeta)
+            : "—";
+        const line = `Power: ${powerStr}%  |  Avg Rel Beta: ${betaStr}`;
+        if (this.desktopTelemetryText) {
+            this.desktopTelemetryText.text = line;
+        }
+        if (this.nudgeButton) {
+            this.nudgeButton.text = line;
+        }
+    }
+
+    /**
      * Short forward burst (same physics as the VR Nudge button). No-op if not flying or no drone.
      */
     startNudgeForward() {
@@ -138,9 +185,9 @@ class XRScene {
         this.nudgeState = {
             velocity: 0,
             isNudging: true,
-            acceleration: 0.025,
-            deceleration: 0.01,
-            maxVelocity: 0.15,
+            acceleration: 0.012,
+            deceleration: 0.006,
+            maxVelocity: 0.08,
             distanceTraveled: 0,
             targetDistance: 2.0
         };
@@ -157,16 +204,19 @@ class XRScene {
 
             if (!shouldDecelerate && this.nudgeState.velocity < this.nudgeState.maxVelocity) {
                 this.nudgeState.velocity += this.nudgeState.acceleration;
-                this.drone.rotation.x = Math.min(0.15, this.nudgeState.velocity * 0.5);
+                this.drone.rotation.x = Math.min(0.1, this.nudgeState.velocity * 0.75);
             } else {
                 this.nudgeState.velocity = Math.max(0, this.nudgeState.velocity - this.nudgeState.deceleration);
-                this.drone.rotation.x = Math.max(0, this.drone.rotation.x - 0.01);
+                this.drone.rotation.x = Math.max(0, this.drone.rotation.x - 0.007);
             }
 
             if (currentZ + this.nudgeState.velocity <= finishLinePosition) {
                 this.drone.position.z += this.nudgeState.velocity;
                 this.nudgeState.distanceTraveled += this.nudgeState.velocity;
             } else {
+                if (currentZ < finishLinePosition) {
+                    this.triggerFinishLineHitEffects();
+                }
                 this.drone.position.z = finishLinePosition;
                 this.nudgeState.isNudging = false;
             }
@@ -184,6 +234,71 @@ class XRScene {
                 }
             }
         });
+    }
+
+    /**
+     * One-shot flash + particles when the drone first reaches the forward boundary (finish line).
+     */
+    triggerFinishLineHitEffects() {
+        if (!this.droneBodyMaterial || !this.scene || !this.drone) {
+            return;
+        }
+        const durationMs = 1000;
+        const flashColor = new BABYLON.Color3(1, 0.82, 0.25);
+        const base = this._droneBodyBaseEmissive;
+
+        if (this._finishLineFlashObserver) {
+            this.scene.onBeforeRenderObservable.remove(this._finishLineFlashObserver);
+            this._finishLineFlashObserver = null;
+        }
+        const start = performance.now();
+        this._finishLineFlashObserver = this.scene.onBeforeRenderObservable.add(() => {
+            const elapsed = performance.now() - start;
+            const t = Math.min(1, elapsed / durationMs);
+            const pulse = 0.5 + 0.5 * Math.sin(elapsed * 0.035);
+            const blend = (1 - t) * pulse;
+            BABYLON.Color3.LerpToRef(base, flashColor, blend, this.droneBodyMaterial.emissiveColor);
+            if (t >= 1) {
+                this.droneBodyMaterial.emissiveColor.copyFrom(base);
+                this.scene.onBeforeRenderObservable.remove(this._finishLineFlashObserver);
+                this._finishLineFlashObserver = null;
+            }
+        });
+
+        if (!this._finishLineParticleSystem) {
+            const ps = new BABYLON.ParticleSystem("finishLineBurst", 1200, this.scene);
+            ps.particleTexture = new BABYLON.Texture("https://playground.babylonjs.com/textures/flare.png", this.scene);
+            ps.emitter = this.drone;
+            ps.minEmitBox = new BABYLON.Vector3(-0.35, -0.05, -0.35);
+            ps.maxEmitBox = new BABYLON.Vector3(0.35, 0.35, 0.35);
+            ps.color1 = new BABYLON.Color4(1, 0.95, 0.4, 1);
+            ps.color2 = new BABYLON.Color4(1, 0.5, 0.1, 1);
+            ps.colorDead = new BABYLON.Color4(1, 1, 1, 0);
+            ps.minSize = 0.04;
+            ps.maxSize = 0.22;
+            ps.minLifeTime = 0.15;
+            ps.maxLifeTime = 0.65;
+            ps.emitRate = 900;
+            ps.gravity = new BABYLON.Vector3(0, 0.15, 0);
+            ps.direction1 = new BABYLON.Vector3(-1.2, 0.3, -1.2);
+            ps.direction2 = new BABYLON.Vector3(1.2, 1.4, 1.2);
+            ps.minAngularSpeed = -0.5;
+            ps.maxAngularSpeed = 0.5;
+            ps.minEmitPower = 0.4;
+            ps.maxEmitPower = 1.2;
+            ps.updateSpeed = 0.02;
+            this._finishLineParticleSystem = ps;
+        }
+        this._finishLineParticleSystem.emitter = this.drone;
+        this._finishLineParticleSystem.start();
+        if (this._finishLineParticleStopTimer) {
+            clearTimeout(this._finishLineParticleStopTimer);
+        }
+        this._finishLineParticleStopTimer = setTimeout(() => {
+            if (this._finishLineParticleSystem) {
+                this._finishLineParticleSystem.stop();
+            }
+        }, durationMs);
     }
 
     /**
@@ -429,7 +544,10 @@ class XRScene {
         // Create material for the body
         const bodyMaterial = new BABYLON.StandardMaterial("bodyMaterial", this.scene);
         bodyMaterial.diffuseColor = new BABYLON.Color3(0.2, 0.2, 0.2);
+        bodyMaterial.emissiveColor = new BABYLON.Color3(0, 0, 0);
         body.material = bodyMaterial;
+        this.droneBodyMaterial = bodyMaterial;
+        this._droneBodyBaseEmissive = bodyMaterial.emissiveColor.clone();
 
         const armLength = 0.6;
         const armWidth = 0.1;
@@ -478,19 +596,23 @@ class XRScene {
     }
 
     /**
-     * Creates the 2D overlay GUI (desktop): fullscreen texture with a horizontal strip of buttons
-     * at the bottom-left. Buttons: Change View (cycle camera mode), Lift-Off/Land, Reset Position.
+     * Creates the 2D overlay GUI (desktop): fullscreen texture with a button row and a telemetry
+     * line (Power % and Avg Rel Beta, matching MQTT). Buttons: Change View, Lift-Off/Land, Reset Position.
      */
     createGUI() {
         const advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
-        const stackPanel = new BABYLON.GUI.StackPanel();
-        stackPanel.isVertical = false;
-        stackPanel.height = "40px";
-        stackPanel.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
-        stackPanel.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
-        stackPanel.left = "20px";
-        stackPanel.top = "-20px";
-        advancedTexture.addControl(stackPanel);
+        const rootPanel = new BABYLON.GUI.StackPanel();
+        rootPanel.isVertical = true;
+        rootPanel.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+        rootPanel.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_BOTTOM;
+        rootPanel.left = "20px";
+        rootPanel.top = "-20px";
+        advancedTexture.addControl(rootPanel);
+
+        const buttonRow = new BABYLON.GUI.StackPanel();
+        buttonRow.isVertical = false;
+        buttonRow.height = "40px";
+        rootPanel.addControl(buttonRow);
 
         const viewButton = BABYLON.GUI.Button.CreateSimpleButton("viewButton", "Change View (Stationary)");
         viewButton.width = "180px";
@@ -499,7 +621,7 @@ class XRScene {
         viewButton.cornerRadius = 5;
         viewButton.background = "rgba(51, 51, 51, 0.8)";
         viewButton.paddingRight = "10px";
-        stackPanel.addControl(viewButton);
+        buttonRow.addControl(viewButton);
 
         // Create Flight Button
         const flightButton = BABYLON.GUI.Button.CreateSimpleButton("flightButton", "Lift-Off");
@@ -510,7 +632,7 @@ class XRScene {
         flightButton.background = "rgba(51, 51, 51, 0.8)";
         flightButton.paddingRight = "10px";
         flightButton.paddingLeft = "10px";
-        stackPanel.addControl(flightButton);
+        buttonRow.addControl(flightButton);
 
         // Create Reset Button
         const resetButton = BABYLON.GUI.Button.CreateSimpleButton("resetButton", "Reset Position");
@@ -520,8 +642,16 @@ class XRScene {
         resetButton.cornerRadius = 5;
         resetButton.background = "rgba(51, 51, 51, 0.8)";
         resetButton.paddingLeft = "10px";
-        stackPanel.addControl(resetButton);
+        buttonRow.addControl(resetButton);
         this.flightButton = flightButton;
+
+        const telemetryText = new BABYLON.GUI.TextBlock("desktopTelemetry");
+        telemetryText.height = "26px";
+        telemetryText.color = "white";
+        telemetryText.fontSize = 14;
+        telemetryText.textHorizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+        rootPanel.addControl(telemetryText);
+        this.desktopTelemetryText = telemetryText;
 
         viewButton.onPointerClickObservable.add(() => {
             this.cameraMode = (this.cameraMode + 1) % 3;
@@ -577,12 +707,13 @@ class XRScene {
                 ));
             }
         });
+        this.updateTelemetryDisplays();
     }
 
     /**
      * Sets up WebXR: default XR experience with track as floor, VR 3D UI panel, and per-frame
-     * camera follow. On enter VR, camera mode is forced to follow and a before-render observer
-     * moves the XR camera (or keeps it stationary when mode 0). On exit, camera mode is restored.
+     * camera positioning. On enter VR, mode defaults to stationary (0); a before-render observer
+     * moves the XR camera to follow the drone when mode 1. On exit, desktop camera mode is restored.
      */
     async initializeXR() {
         try {
@@ -594,13 +725,12 @@ class XRScene {
             xrHelper.baseExperience.onStateChangedObservable.add((state) => {
                 if (state === BABYLON.WebXRState.IN_XR) {
                     this.previousCameraMode = this.cameraMode;
-                    this.cameraMode = 1;
-                    const followDistance = 5;
+                    this.cameraMode = 0;
                     const followHeight = 2;
                     xrHelper.baseExperience.camera.position = new BABYLON.Vector3(
-                        this.drone.position.x,
-                        this.drone.position.y + followHeight,
-                        this.drone.position.z - followDistance
+                        0,
+                        this.trackElevation + followHeight,
+                        -this.trackLength / 2 + 4
                     );
                     if (!this.xrCameraFollow) {
                         this.xrCameraFollow = this.scene.onBeforeRenderObservable.add(() => {
@@ -652,9 +782,9 @@ class XRScene {
     /**
      * Creates the VR 3D UI: a plane panel with holographic buttons (View, Lift-Off, Reset, Nudge).
      * Panel position is updated each frame to follow the XR camera with panelOffset. Q/A, W/S, E/D
-     * adjust panelOffset for layout tuning. Nudge button shows latest MQTT power and triggers a
-     * short forward burst when pressed while flying. MQTT can also trigger the same burst when
-     * power exceeds powerNudgeThreshold, at most once per powerNudgeCooldownMs while flying.
+     * adjust panelOffset for layout tuning. Nudge button shows Power % and Avg Rel Beta (same as desktop)
+     * and triggers a short forward burst when pressed while flying. MQTT can also trigger the same
+     * burst when focusComponents.avgRelativeBeta exceeds powerNudgeThreshold, at most once per powerNudgeCooldownMs while flying.
      */
     createVRUI(xrHelper) {
         this.panelOffset = { x: 0.80, y: -0.90, z: 1.20 };
@@ -696,7 +826,7 @@ class XRScene {
 
         const viewButton = new BABYLON.GUI.HolographicButton("viewButton");
         panel.addControl(viewButton);
-        viewButton.text = "Change View";
+        viewButton.text = "View: Stationary";
 
         const flightButton = new BABYLON.GUI.HolographicButton("flightButton");
         panel.addControl(flightButton);
@@ -707,8 +837,9 @@ class XRScene {
         resetButton.text = "Reset";
         const nudgeButton = new BABYLON.GUI.HolographicButton("nudgeButton");
         panel.addControl(nudgeButton);
-        nudgeButton.text = "Power: 0.000%";
+        nudgeButton.text = "Power: 0.000%  |  Avg Rel Beta: —";
         this.nudgeButton = nudgeButton;
+        this.updateTelemetryDisplays();
 
         viewButton.onPointerUpObservable.add(() => {
             if (xrHelper.baseExperience.state === BABYLON.WebXRState.IN_XR) {
@@ -823,10 +954,14 @@ class XRScene {
                         );
                     }
                 }
+                const prevZxr = this.drone.position.z;
                 this.drone.position.x += this.xrVelocity.x;
                 this.drone.position.y += this.xrVelocity.y;
                 this.drone.position.z += this.xrVelocity.z;
                 if (this.drone.position.z > finishLinePosition) {
+                    if (prevZxr < finishLinePosition) {
+                        this.triggerFinishLineHitEffects();
+                    }
                     this.drone.position.z = finishLinePosition;
                     this.xrVelocity.z = 0;
                 }
@@ -972,10 +1107,14 @@ class XRScene {
                         if (Math.abs(velocity.y) < 0.001) velocity.y = 0;
                     }
                 }
+                const prevZkb = this.drone.position.z;
                 this.drone.position.x += velocity.x;
                 this.drone.position.y += velocity.y;
                 this.drone.position.z += velocity.z;
                 if (this.drone.position.z > finishLinePosition) {
+                    if (prevZkb < finishLinePosition) {
+                        this.triggerFinishLineHitEffects();
+                    }
                     this.drone.position.z = finishLinePosition;
                     velocity.z = 0;
                 }
